@@ -161,6 +161,30 @@ studentClassIdSelect.addEventListener("change", async () => {
   await renderStudentTable();
 });
 
+usageRefreshBtn?.addEventListener("click", async () => {
+  try {
+    await loadUsageLogs();
+  } catch (e) {
+    log(e);
+  }
+});
+
+usageLimitInput?.addEventListener("change", async () => {
+  try {
+    await loadUsageLogs();
+  } catch (e) {
+    log(e);
+  }
+});
+
+usageStudentFilter?.addEventListener("change", async () => {
+  try {
+    await loadUsageLogs();
+  } catch (e) {
+    log(e);
+  }
+});
+
 async function refreshGradeOptions() {
   const ret = await api("/api/v1/grades", "GET", undefined, state.teacherToken);
   const all = ['<option value="">请选择年级</option>']
@@ -223,6 +247,83 @@ async function renderStudentTable() {
   await loadUsageLogs().catch((e) => log(e));
 }
 
+function escapeText(v) {
+  return String(v ?? "");
+}
+
+async function loadUsageLogs() {
+  if (!usageTableBody || !usageDetails) return;
+  const classId = studentClassIdSelect?.value || state.studentClassId;
+  if (!classId) return;
+
+  const limit = usageLimitInput ? Number(usageLimitInput.value || 20) : 20;
+  const studentId = usageStudentFilter?.value || "";
+
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (studentId) params.set("studentId", studentId);
+
+  const ret = await api(`/api/v1/classes/${classId}/usage?${params.toString()}`, "GET", undefined, state.teacherToken);
+  state.usageItems = ret.data.items || [];
+
+  usageTableBody.innerHTML = "";
+  for (let i = 0; i < state.usageItems.length; i += 1) {
+    const item = state.usageItems[i];
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+
+    const timeTd = document.createElement("td");
+    timeTd.textContent = item.createdAt ? new Date(item.createdAt).toLocaleString() : "";
+
+    const stuTd = document.createElement("td");
+    stuTd.textContent = item.displayName ? `${item.displayName} (${item.studentNo})` : `${item.studentNo}`;
+
+    const epTd = document.createElement("td");
+    epTd.textContent = item.endpoint || "";
+
+    const modelTd = document.createElement("td");
+    modelTd.textContent = item.selectedModel || "";
+
+    const previewTd = document.createElement("td");
+    previewTd.textContent = escapeText(item.promptPreview).slice(0, 80);
+
+    tr.appendChild(timeTd);
+    tr.appendChild(stuTd);
+    tr.appendChild(epTd);
+    tr.appendChild(modelTd);
+    tr.appendChild(previewTd);
+    tr.dataset.usageIndex = String(i);
+    usageTableBody.appendChild(tr);
+  }
+
+  usageDetails.textContent = "";
+
+  // Show full request/response when user clicks a log row.
+  usageTableBody.onclick = (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    const tr = t.closest("tr");
+    if (!tr) return;
+    const idx = Number(tr.dataset.usageIndex);
+    const item = state.usageItems[idx];
+    if (!item) return;
+    usageDetails.textContent = JSON.stringify(
+      {
+        createdAt: item.createdAt,
+        student: { studentId: item.studentId, studentNo: item.studentNo, displayName: item.displayName },
+        endpoint: item.endpoint,
+        selectedModel: item.selectedModel,
+        requestPayload: item.requestPayload,
+        responsePayload: item.responsePayload,
+        costCny: item.costCny,
+        fallbackUsed: item.fallbackUsed,
+        statusCode: item.statusCode,
+      },
+      null,
+      2,
+    );
+  };
+}
+
 function showSection(sectionId) {
   [entryGateway, teacherAuth, studentAuth, teacherDashboard, studentWorkspace].forEach((el) => el && el.classList.add("hidden"));
   sectionId.classList.remove("hidden");
@@ -276,9 +377,63 @@ function populateSetupClassesForGrade(gradeName) {
     const best = filtered.find((c) => c.seatUsed > 0) || filtered[0];
     setupClassSelect.value = best.classId;
     state.setupClassId = best.classId;
+    if (state.teacherToken) refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
   } else {
     setupClassSelect.value = "";
     state.setupClassId = "";
+    if (state.teacherToken) refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
+  }
+}
+
+async function loadSetupModelProviders() {
+  if (!setupModelProviderSelect || !state.teacherToken) return;
+  const ret = await api("/api/v1/system/providers", "GET", undefined, state.teacherToken);
+  setupModelProviderSelect.innerHTML = '<option value="">选择平台（需已在系统配置填 Key）</option>';
+  for (const p of ret.data.providers) {
+    const opt = document.createElement("option");
+    opt.value = p.key;
+    opt.textContent = `${p.name} (${p.kind})`;
+    setupModelProviderSelect.appendChild(opt);
+  }
+}
+
+async function loadSetupChatModels(providerKey) {
+  if (!setupChatModelSelect || !providerKey) return;
+  setupChatModelSelect.innerHTML = '<option value="">请选择模型</option>';
+  try {
+    const ret = await api(`/api/v1/system/providers/${providerKey}/models`, "GET", undefined, state.teacherToken);
+    const models = ret.data.models || [];
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.displayName || m.id;
+      setupChatModelSelect.appendChild(opt);
+    }
+  } catch (e) {
+    toast(e?.code ? e.code : "拉取模型失败");
+    // Keep empty list; user can retry after saving keys.
+  }
+
+  // If policy already has an allowed model, pre-select it when present.
+  const allowed = state.setupAllowedChatModels || [];
+  const primary = allowed[0];
+  if (primary && Array.from(setupChatModelSelect.options).some((o) => o.value === primary)) {
+    setupChatModelSelect.value = primary;
+  }
+}
+
+async function refreshSetupAllowedModelsFromPolicy() {
+  const classId = setupClassSelect?.value || state.setupClassId;
+  if (!classId || !state.teacherToken) return;
+  const ret = await api(`/api/v1/classes/${classId}/policies/ai-models`, "GET", undefined, state.teacherToken);
+  state.setupAllowedChatModels = ret.data.allowedChatModels || [];
+  const allowed = state.setupAllowedChatModels;
+  setupCurrentAllowedModelsEl && (setupCurrentAllowedModelsEl.textContent = allowed.length ? `当前：${allowed.join(",")}` : "当前：未配置");
+
+  // Attempt to pre-select the policy model when model options are already loaded.
+  const primary = allowed[0] || "";
+  if (primary && setupChatModelSelect && Array.from(setupChatModelSelect.options).some((o) => o.value === primary)) {
+    setupChatModelSelect.value = primary;
   }
 }
 
@@ -299,25 +454,28 @@ async function generateJoinLink() {
   toast("登录链接已生成");
 }
 
-document.getElementById("go-teacher-auth").addEventListener("click", () => showSection(teacherAuth));
-document.getElementById("go-student-auth").addEventListener("click", () => showSection(studentAuth));
-document.getElementById("back-to-entry-1").addEventListener("click", () => showSection(entryGateway));
-document.getElementById("back-to-entry-2").addEventListener("click", () => showSection(entryGateway));
+document.getElementById("go-teacher-auth")?.addEventListener("click", () => showSection(teacherAuth));
+document.getElementById("go-student-auth")?.addEventListener("click", () => showSection(studentAuth));
+document.getElementById("back-to-entry-1")?.addEventListener("click", () => showSection(entryGateway));
+document.getElementById("back-to-entry-2")?.addEventListener("click", () => showSection(entryGateway));
 
 // Teacher dashboard tabs & classroom code generation
 document.querySelectorAll("#teacher-dashboard button.tab-btn[data-teacher-tab]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const tab = btn.dataset.teacherTab;
     setTeacherTab(tab);
-    if (tab === "system") {
-      loadSystemProviders().catch((e) => log(e));
-    }
+    if (tab === "system") loadSystemProviders().catch((e) => log(e));
+    if (tab === "setup") loadSetupModelProviders().catch((e) => log(e));
   });
 });
 
 if (setupGradeSelect && setupClassSelect) {
   setupGradeSelect.addEventListener("change", () => {
     populateSetupClassesForGrade(setupGradeSelect.value);
+  });
+  setupClassSelect.addEventListener("change", () => {
+    state.setupClassId = setupClassSelect.value || "";
+    refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
   });
 }
 
@@ -331,6 +489,31 @@ copyLoginLinkBtn?.addEventListener("click", async () => {
     toast("已复制登录链接");
   } catch {
     toast("复制失败，请手动复制");
+  }
+});
+
+setupModelProviderSelect?.addEventListener("change", async () => {
+  await loadSetupChatModels(setupModelProviderSelect.value);
+});
+
+setupOpenModelBtn?.addEventListener("click", async () => {
+  try {
+    const classId = setupClassSelect?.value || state.setupClassId;
+    if (!classId) return toast("请先选择班级");
+    const selectedModel = setupChatModelSelect?.value;
+    if (!selectedModel) return toast("请选择要开放的聊天模型");
+
+    await api(
+      `/api/v1/classes/${classId}/policies/ai-models`,
+      "PUT",
+      { chatModels: [selectedModel], imageModels: [] },
+      state.teacherToken,
+    );
+    await refreshSetupAllowedModelsFromPolicy();
+    toast("已保存并开放给学生");
+  } catch (e) {
+    toast(e?.code ? e.code : "保存失败");
+    log(e);
   }
 });
 
@@ -410,6 +593,9 @@ document.getElementById("teacher-login-form").addEventListener("submit", async (
     showSection(teacherDashboard);
     await refreshTeacherSetupSelects();
     setTeacherTab("setup");
+    // Ensure setup model controls have provider list loaded.
+    await loadSetupModelProviders().catch((e) => log(e));
+    await refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
     // Lazy load system providers when user enters system tab.
     log(ret);
   } catch (err) {

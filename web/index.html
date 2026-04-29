@@ -9,25 +9,16 @@
   <body>
     <header>
       <h1>AI4K12 Classroom</h1>
-      <p>简洁认证流：身份选择 -> 登录/注册 -> 控制台</p>
+      <p>简洁认证流：教师登录/注册 -> 控制台（学生走网址直接登录）</p>
     </header>
 
     <main>
-      <section class="card" id="entry-gateway">
-        <h2>选择入口</h2>
-        <div class="split-actions">
-          <button id="go-teacher-auth" class="secondary">教师端</button>
-          <button id="go-student-auth" class="secondary">学生端</button>
-        </div>
-      </section>
-
-      <section class="card hidden" id="teacher-auth">
+      <section class="card" id="teacher-auth">
         <div class="auth-header">
           <h2>教师身份验证</h2>
           <div class="split-actions">
             <button id="show-teacher-login" class="secondary">登录</button>
             <button id="show-teacher-register" class="secondary">注册</button>
-            <button id="back-to-entry-1" class="ghost">返回</button>
           </div>
         </div>
 
@@ -50,9 +41,7 @@
       <section class="card hidden" id="student-auth">
         <div class="auth-header">
           <h2>学生登录</h2>
-          <div class="split-actions">
-            <button id="back-to-entry-2" class="ghost">返回</button>
-          </div>
+          <div class="split-actions"></div>
         </div>
 
         <form id="student-join-login-form" class="auth-form hidden">
