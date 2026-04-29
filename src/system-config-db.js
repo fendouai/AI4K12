@@ -43,6 +43,7 @@ export function initSystemConfigDb() {
       teacher_email TEXT NOT NULL,
       class_name TEXT NOT NULL,
       chat_provider_key TEXT,
+      image_provider_key TEXT,
       chat_models_json TEXT NOT NULL DEFAULT '[]',
       image_models_json TEXT NOT NULL DEFAULT '[]',
       keyword_whitelist_json TEXT NOT NULL DEFAULT '[]',
@@ -51,6 +52,11 @@ export function initSystemConfigDb() {
       PRIMARY KEY (teacher_email, class_name)
     );
   `);
+
+  const cols = db.prepare("PRAGMA table_info(class_policies)").all();
+  if (!cols.some((c) => c.name === "image_provider_key")) {
+    db.exec("ALTER TABLE class_policies ADD COLUMN image_provider_key TEXT");
+  }
 }
 
 export function loadPersistedSystemConfig() {
@@ -65,6 +71,7 @@ export function loadPersistedSystemConfig() {
       teacher_email,
       class_name,
       chat_provider_key,
+      image_provider_key,
       chat_models_json,
       image_models_json,
       keyword_whitelist_json,
@@ -90,6 +97,7 @@ export function loadPersistedSystemConfig() {
       teacherEmail: x.teacher_email,
       className: x.class_name,
       chatProviderKey: x.chat_provider_key || null,
+      imageProviderKey: x.image_provider_key || null,
       chatModels: safeParseJsonArray(x.chat_models_json),
       imageModels: safeParseJsonArray(x.image_models_json),
       keywordWhitelist: safeParseJsonArray(x.keyword_whitelist_json),
@@ -155,6 +163,7 @@ export function upsertClassPolicyPersistent({
   teacherEmail,
   className,
   chatProviderKey,
+  imageProviderKey,
   chatModels = [],
   imageModels = [],
   keywordWhitelist = [],
@@ -168,6 +177,7 @@ export function upsertClassPolicyPersistent({
       teacher_email,
       class_name,
       chat_provider_key,
+      image_provider_key,
       chat_models_json,
       image_models_json,
       keyword_whitelist_json,
@@ -178,6 +188,7 @@ export function upsertClassPolicyPersistent({
       @teacherEmail,
       @className,
       @chatProviderKey,
+      @imageProviderKey,
       @chatModelsJson,
       @imageModelsJson,
       @keywordWhitelistJson,
@@ -186,6 +197,7 @@ export function upsertClassPolicyPersistent({
     )
     ON CONFLICT(teacher_email, class_name) DO UPDATE SET
       chat_provider_key = excluded.chat_provider_key,
+      image_provider_key = excluded.image_provider_key,
       chat_models_json = excluded.chat_models_json,
       image_models_json = excluded.image_models_json,
       keyword_whitelist_json = excluded.keyword_whitelist_json,
@@ -195,6 +207,7 @@ export function upsertClassPolicyPersistent({
     teacherEmail,
     className,
     chatProviderKey: chatProviderKey || null,
+    imageProviderKey: imageProviderKey ?? null,
     chatModelsJson: JSON.stringify(chatModels || []),
     imageModelsJson: JSON.stringify(imageModels || []),
     keywordWhitelistJson: JSON.stringify(keywordWhitelist || []),

@@ -137,3 +137,47 @@ export function getProviderCatalogKey(providerKey) {
   return providerCatalog[providerKey];
 }
 
+/** Text-to-image via OpenAI-compatible POST /v1/images/generations. SiliconFlow uses image_size + batch_size. */
+export async function callProviderTextToImage(providerKey, { apiKey, baseUrl, model, prompt, size, n = 1 }) {
+  const catalog = providerCatalog[providerKey];
+  const normalizedBase = String(baseUrl || catalog?.defaults?.baseUrl || "").replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalizedBase)) {
+    throw new Error("PROVIDER_BASE_URL_INVALID");
+  }
+  const url = `${normalizedBase}/v1/images/generations`;
+  const isSiliconflow = providerKey === "siliconflow";
+  /** @type {Record<string, unknown>} */
+  const body = isSiliconflow
+    ? {
+        model,
+        prompt,
+        image_size: size || "1024x1024",
+        batch_size: Math.min(4, Math.max(1, n)),
+      }
+    : {
+        model,
+        prompt,
+        size: size || "1024x1024",
+        n: Math.min(4, Math.max(1, n)),
+      };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.error?.message || json?.message || `UPSTREAM_HTTP_${res.status}`);
+  }
+  const arr = Array.isArray(json?.data) ? json.data : Array.isArray(json?.images) ? json.images : [];
+  const first = arr[0];
+  const imageUrl = first?.url || first?.image_url || (typeof first === "string" ? first : null);
+  const b64 = first?.b64_json;
+  if (!imageUrl && !b64) {
+    throw new Error("UPSTREAM_IMAGE_EMPTY");
+  }
+  return { imageUrl: imageUrl || null, b64: b64 || null, raw: json };
+}

@@ -125,6 +125,33 @@
           <div class="toolbar">
             <span id="setup-current-allowed-models" class="total-badge">当前：未配置</span>
           </div>
+
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 16px 0;" />
+          <h4 style="margin: 0 0 8px; font-size: 15px; color: #374151;">文生图（硅基流动等 OpenAI 兼容平台）</h4>
+          <p style="margin: 0 0 10px; font-size: 13px; color: #6b7280;">
+            在「系统配置」中为平台填写 API Key 后，在此选择<strong>文生图模型</strong>并保存。可与上方聊天使用同一平台，也可单独指定（例如仅用硅基流动走 <code>/v1/images/generations</code>）。
+          </p>
+          <div class="toolbar">
+            <span class="total-badge">文生图平台</span>
+            <select id="setup-image-provider-select" style="min-width: 260px;">
+              <option value="">选择平台（留空则保存模型名单，Key 跟随课堂聊天配置）</option>
+            </select>
+          </div>
+          <div class="toolbar">
+            <select id="setup-image-model-select" style="flex: 1; min-width: 260px;">
+              <option value="">选择文生图模型</option>
+            </select>
+            <button type="button" id="setup-save-image-btn">保存文生图设置</button>
+            <button type="button" id="setup-image-inherit-chat-btn" class="ghost" title="清除本班单独指定的文生图平台，使用与聊天相同的 Key">
+              文生图沿用聊天 Key
+            </button>
+          </div>
+          <div class="toolbar">
+            <input id="setup-image-model-manual" type="text" placeholder="列表拉取失败时可手动填写模型 id（如硅基流动上的文生图模型名）" style="flex: 1; min-width: 260px;" />
+          </div>
+          <div class="toolbar">
+            <span id="setup-current-allowed-image-models" class="total-badge">当前文生图：未开放</span>
+          </div>
         </div>
 
         <div class="table-card hidden" data-tab="system" id="teacher-system-card">
@@ -349,6 +376,34 @@
           <div id="student-chat-history" class="chat-history"></div>
           <textarea name="prompt" placeholder="输入你的问题..." required></textarea>
           <button type="submit">发送</button>
+        </form>
+
+        <form id="student-image-form" class="student-image-panel">
+          <h3>文生图</h3>
+          <p id="student-image-disabled-hint" class="student-image-hint hidden" style="font-size: 13px; color: #6b7280;">
+            本班尚未开放文生图模型。请教师先在「课堂设置」中选择平台并保存文生图模型（如硅基流动等）。
+          </p>
+          <div class="toolbar student-image-controls">
+            <span class="total-badge">模型</span>
+            <select id="student-image-model-select" style="flex: 1; min-width: 220px;">
+              <option value="">加载中…</option>
+            </select>
+          </div>
+          <div class="toolbar student-image-controls">
+            <span class="total-badge">尺寸</span>
+            <select id="student-image-size">
+              <option value="1024x1024">1024×1024</option>
+              <option value="512x512">512×512</option>
+              <option value="768x768">768×768</option>
+              <option value="720x1440">720×1440（竖版）</option>
+            </select>
+            <span class="total-badge">张数</span>
+            <input id="student-image-n" type="number" min="1" max="4" value="1" style="width: 72px;" />
+          </div>
+          <textarea id="student-image-prompt" placeholder="描述你想生成的画面…" rows="4"></textarea>
+          <button type="submit" id="student-image-submit-btn">生成图片</button>
+          <div id="student-image-status" class="student-image-status hidden"></div>
+          <div id="student-image-preview" class="student-image-preview"></div>
         </form>
       </section>
 

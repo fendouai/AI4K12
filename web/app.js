@@ -14,6 +14,7 @@ const state = {
   setupClassId: "",
   setupAllClasses: [],
   setupAllowedChatModels: [],
+  setupAllowedImageModels: [],
   usageItems: [],
   systemPublicBaseUrl: "",
   systemPublicDomain: "",
@@ -56,6 +57,12 @@ const setupChatModelSelect = document.getElementById("setup-chat-model-select");
 const setupChatModelManualInput = document.getElementById("setup-chat-model-manual");
 const setupOpenModelBtn = document.getElementById("setup-open-model-btn");
 const setupCurrentAllowedModelsEl = document.getElementById("setup-current-allowed-models");
+const setupImageProviderSelect = document.getElementById("setup-image-provider-select");
+const setupImageModelSelect = document.getElementById("setup-image-model-select");
+const setupImageModelManualInput = document.getElementById("setup-image-model-manual");
+const setupSaveImageBtn = document.getElementById("setup-save-image-btn");
+const setupImageInheritChatBtn = document.getElementById("setup-image-inherit-chat-btn");
+const setupCurrentAllowedImageModelsEl = document.getElementById("setup-current-allowed-image-models");
 const studentJoinLoginForm = document.getElementById("student-join-login-form");
 const studentJoinClassInfo = document.getElementById("student-join-class-info");
 const studentJoinSelect = document.getElementById("student-join-select");
@@ -65,6 +72,15 @@ const toastEl = document.getElementById("toast");
 const studentChatModelSelect = document.getElementById("student-chat-model-select");
 const studentChatHistory = document.getElementById("student-chat-history");
 const studentChatClearBtn = document.getElementById("student-chat-clear-btn");
+const studentImageForm = document.getElementById("student-image-form");
+const studentImageModelSelect = document.getElementById("student-image-model-select");
+const studentImageSizeSelect = document.getElementById("student-image-size");
+const studentImageNInput = document.getElementById("student-image-n");
+const studentImagePromptInput = document.getElementById("student-image-prompt");
+const studentImageSubmitBtn = document.getElementById("student-image-submit-btn");
+const studentImagePreview = document.getElementById("student-image-preview");
+const studentImageStatus = document.getElementById("student-image-status");
+const studentImageDisabledHint = document.getElementById("student-image-disabled-hint");
 
 const usageLimitInput = document.getElementById("usage-limit-input");
 const usageStudentFilter = document.getElementById("usage-student-filter");
@@ -411,6 +427,49 @@ async function loadStudentChatModels() {
   }
 }
 
+function setStudentImagePanelEnabled(enabled) {
+  if (!studentImageForm) return;
+  studentImageForm.classList.toggle("is-disabled", !enabled);
+  studentImageDisabledHint?.classList.toggle("hidden", enabled);
+}
+
+async function loadStudentImageModels() {
+  if (!studentImageModelSelect) return;
+  if (!state.studentToken || !state.classId) {
+    setStudentImagePanelEnabled(false);
+    return;
+  }
+
+  try {
+    const ret = await api("/api/v1/ai/models?endpoint=image", "GET", undefined, state.studentToken);
+    const models = ret.data.models || [];
+    studentImageModelSelect.innerHTML = "";
+
+    if (!models.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "未开放文生图";
+      studentImageModelSelect.appendChild(opt);
+      setStudentImagePanelEnabled(false);
+      return;
+    }
+
+    setStudentImagePanelEnabled(true);
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.displayName || m.id;
+      studentImageModelSelect.appendChild(opt);
+    }
+    const primary = models.find((m) => m.isPrimary)?.id || models[0]?.id || "";
+    studentImageModelSelect.value = primary;
+  } catch (e) {
+    setStudentImagePanelEnabled(false);
+    toast(e?.code ? e.code : "加载文生图模型失败");
+    log(e);
+  }
+}
+
 function resetStudentChat() {
   state.studentChatMessages = [];
   renderStudentChatHistory();
@@ -498,14 +557,43 @@ function populateSetupClassesForGrade(gradeName) {
 }
 
 async function loadSetupModelProviders() {
-  if (!setupModelProviderSelect || !state.teacherToken) return;
+  if (!state.teacherToken) return;
   const ret = await api("/api/v1/system/providers", "GET", undefined, state.teacherToken);
-  setupModelProviderSelect.innerHTML = '<option value="">选择平台（需已在系统配置填 Key）</option>';
-  for (const p of ret.data.providers) {
-    const opt = document.createElement("option");
-    opt.value = p.key;
-    opt.textContent = `${p.name} (${p.kind})`;
-    setupModelProviderSelect.appendChild(opt);
+  const providers = ret.data.providers || [];
+  const fillSelect = (selectEl, emptyLabel) => {
+    if (!selectEl) return;
+    selectEl.innerHTML = `<option value="">${emptyLabel}</option>`;
+    for (const p of providers) {
+      const opt = document.createElement("option");
+      opt.value = p.key;
+      opt.textContent = `${p.name} (${p.kind})`;
+      selectEl.appendChild(opt);
+    }
+  };
+  fillSelect(setupModelProviderSelect, "选择平台（需已在系统配置填 Key）");
+  fillSelect(setupImageProviderSelect, "选择平台（留空表示不单独指定，沿用聊天 Key）");
+}
+
+async function loadSetupImageModels(providerKey) {
+  if (!setupImageModelSelect || !providerKey) return;
+  setupImageModelSelect.innerHTML = '<option value="">请选择文生图模型</option>';
+  try {
+    const ret = await api(`/api/v1/system/providers/${providerKey}/models`, "GET", undefined, state.teacherToken);
+    const models = ret.data.models || [];
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.displayName || m.id;
+      setupImageModelSelect.appendChild(opt);
+    }
+  } catch (e) {
+    toast("文生图模型列表拉取失败，可手动填写模型 id");
+  }
+
+  const allowed = state.setupAllowedImageModels || [];
+  const primary = allowed[0];
+  if (primary && Array.from(setupImageModelSelect.options).some((o) => o.value === primary)) {
+    setupImageModelSelect.value = primary;
   }
 }
 
@@ -556,11 +644,17 @@ async function refreshSetupAllowedModelsFromPolicy() {
   if (!classId || !state.teacherToken) return;
   const ret = await api(`/api/v1/classes/${classId}/policies/ai-models`, "GET", undefined, state.teacherToken);
   state.setupAllowedChatModels = ret.data.allowedChatModels || [];
+  state.setupAllowedImageModels = ret.data.allowedImageModels || [];
 
   const allowed = state.setupAllowedChatModels;
   const providerKey = ret.data.allowedChatProviderKey || "";
 
   setupCurrentAllowedModelsEl && (setupCurrentAllowedModelsEl.textContent = allowed.length ? `当前：${allowed.join(",")}` : "当前：未配置");
+
+  const imgAllowed = state.setupAllowedImageModels;
+  const imgProviderKey = ret.data.allowedImageProviderKey || "";
+  setupCurrentAllowedImageModelsEl &&
+    (setupCurrentAllowedImageModelsEl.textContent = imgAllowed.length ? `当前文生图：${imgAllowed.join(", ")}` : "当前文生图：未开放");
 
   // 1) Always ensure the model dropdown has options for currently allowed models.
   //    This fixes cases where providerKey isn't configured yet but we still want a visible dropdown.
@@ -582,6 +676,24 @@ async function refreshSetupAllowedModelsFromPolicy() {
     }
   }
 
+  if (setupImageModelSelect) {
+    setupImageModelSelect.innerHTML = "";
+    if (imgAllowed.length) {
+      for (const m of imgAllowed) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        setupImageModelSelect.appendChild(opt);
+      }
+      setupImageModelSelect.value = imgAllowed[0];
+    } else {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "未配置文生图模型";
+      setupImageModelSelect.appendChild(opt);
+    }
+  }
+
   // 2) If we have providerKey, try to load the full provider model list
   //    and keep the current allowed model selected.
   if (setupModelProviderSelect && providerKey) {
@@ -589,6 +701,18 @@ async function refreshSetupAllowedModelsFromPolicy() {
     await loadSetupChatModels(providerKey).catch((e) => log(e));
     if (allowed[0] && setupChatModelSelect && Array.from(setupChatModelSelect.options).some((o) => o.value === allowed[0])) {
       setupChatModelSelect.value = allowed[0];
+    }
+  }
+
+  if (setupImageProviderSelect) {
+    if (imgProviderKey) {
+      setupImageProviderSelect.value = imgProviderKey;
+      await loadSetupImageModels(imgProviderKey).catch((e) => log(e));
+      if (imgAllowed[0] && setupImageModelSelect && Array.from(setupImageModelSelect.options).some((o) => o.value === imgAllowed[0])) {
+        setupImageModelSelect.value = imgAllowed[0];
+      }
+    } else {
+      setupImageProviderSelect.value = "";
     }
   }
 }
@@ -666,7 +790,6 @@ setupOpenModelBtn?.addEventListener("click", async () => {
 
     const payload = {
       chatModels: [selectedModel],
-      imageModels: [],
     };
     // Only include providerKey when user actually selected it; otherwise don't overwrite.
     if (selectedProviderKey) payload.chatProviderKey = selectedProviderKey;
@@ -679,6 +802,48 @@ setupOpenModelBtn?.addEventListener("click", async () => {
     );
     await refreshSetupAllowedModelsFromPolicy();
     toast("已保存并开放给学生");
+  } catch (e) {
+    toast(e?.code ? e.code : "保存失败");
+    log(e);
+  }
+});
+
+setupImageProviderSelect?.addEventListener("change", async () => {
+  await loadSetupImageModels(setupImageProviderSelect.value);
+});
+
+setupSaveImageBtn?.addEventListener("click", async () => {
+  try {
+    const classId = setupClassSelect?.value || state.setupClassId;
+    if (!classId) return toast("请先选择班级");
+    const selectedModel = setupImageModelSelect?.value || setupImageModelManualInput?.value?.trim();
+    if (!selectedModel) return toast("请选择或填写文生图模型");
+    const imageProviderKey = setupImageProviderSelect?.value?.trim() || undefined;
+    /** @type {{ imageModels: string[]; imageProviderKey?: string | null }} */
+    const payload = { imageModels: [selectedModel] };
+    if (imageProviderKey) payload.imageProviderKey = imageProviderKey;
+
+    await api(`/api/v1/classes/${classId}/policies/ai-models`, "PUT", payload, state.teacherToken);
+    await refreshSetupAllowedModelsFromPolicy();
+    toast("文生图设置已保存");
+  } catch (e) {
+    toast(e?.code ? e.code : "保存失败");
+    log(e);
+  }
+});
+
+setupImageInheritChatBtn?.addEventListener("click", async () => {
+  try {
+    const classId = setupClassSelect?.value || state.setupClassId;
+    if (!classId) return toast("请先选择班级");
+    await api(
+      `/api/v1/classes/${classId}/policies/ai-models`,
+      "PUT",
+      { imageProviderKey: null },
+      state.teacherToken,
+    );
+    await refreshSetupAllowedModelsFromPolicy();
+    toast("文生图将使用与聊天相同的平台 Key");
   } catch (e) {
     toast(e?.code ? e.code : "保存失败");
     log(e);
@@ -1110,6 +1275,7 @@ if (studentJoinLoginForm) {
       resetStudentChat();
       showSection(studentWorkspace);
       await loadStudentChatModels().catch((err) => log(err));
+      await loadStudentImageModels().catch((err) => log(err));
       toast("已登录学生账号");
       history.replaceState({}, document.title, window.location.pathname);
       log(ret);
@@ -1155,6 +1321,72 @@ document.getElementById("student-chat-form").addEventListener("submit", async (e
     renderStudentChatHistory();
     log(err);
     toast(err?.code ? err.code : "发送失败");
+  }
+});
+
+studentImageForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (studentImageForm.classList.contains("is-disabled")) return;
+  const prompt = String(studentImagePromptInput?.value || "").trim();
+  if (!prompt) return toast("请填写画面描述");
+
+  const model = studentImageModelSelect?.value || undefined;
+  if (!model) return toast("请选择文生图模型");
+
+  const size = studentImageSizeSelect?.value || "1024x1024";
+  const n = Math.min(4, Math.max(1, Number(studentImageNInput?.value || 1)));
+
+  if (studentImagePreview) studentImagePreview.innerHTML = "";
+  if (studentImageStatus) {
+    studentImageStatus.textContent = "生成中…";
+    studentImageStatus.classList.remove("hidden");
+  }
+  if (studentImageSubmitBtn) studentImageSubmitBtn.disabled = true;
+
+  try {
+    const ret = await api(
+      "/api/v1/ai/images/generations",
+      "POST",
+      { classId: state.classId, prompt, model, size, n },
+      state.studentToken,
+    );
+    const d = ret.data;
+    if (studentImageStatus) {
+      if (d?.jobId) {
+        studentImageStatus.textContent = `已排队：${d.jobId}（演示模式，约 ${d.estimatedSeconds ?? "?"} 秒）`;
+      } else {
+        studentImageStatus.textContent = d?.fallbackUsed === false ? "已由上游生成" : "已完成";
+      }
+    }
+
+    if (d?.imageUrl && studentImagePreview) {
+      const img = document.createElement("img");
+      img.src = d.imageUrl;
+      img.alt = "文生图结果";
+      studentImagePreview.appendChild(img);
+    } else if (d?.b64Json && studentImagePreview) {
+      const img = document.createElement("img");
+      img.src = `data:image/png;base64,${d.b64Json}`;
+      img.alt = "文生图结果";
+      studentImagePreview.appendChild(img);
+    } else if (d?.jobId && studentImagePreview) {
+      const p = document.createElement("p");
+      p.style.fontSize = "13px";
+      p.style.color = "#6b7280";
+      p.textContent = "当前为队列/演示响应，配置上游文生图后将在此显示图片。";
+      studentImagePreview.appendChild(p);
+    }
+
+    toast(d?.imageUrl || d?.b64Json ? "图片已生成" : "请求已提交");
+    log(ret);
+  } catch (err) {
+    if (studentImageStatus) {
+      studentImageStatus.textContent = `失败：${err?.message || err?.code || "未知错误"}`;
+    }
+    log(err);
+    toast(err?.code ? err.code : "文生图失败");
+  } finally {
+    if (studentImageSubmitBtn) studentImageSubmitBtn.disabled = false;
   }
 });
 

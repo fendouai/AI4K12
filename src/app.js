@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { authRequired, errorResp, okResp, signToken } from "./auth.js";
 import { config, resolvePublicBaseUrl } from "./config.js";
 import { classDailyUsage, db, genId, nowIso, randomCode, studentDailyUsage } from "./store.js";
-import { getProviderCatalogKey, listProviderModels, listSystemProviders, upsertProviderKey } from "./providers.js";
+import { callProviderTextToImage, getProviderCatalogKey, listProviderModels, listSystemProviders, upsertProviderKey } from "./providers.js";
 import {
   initSystemConfigDb,
   loadPersistedSystemConfig,
@@ -290,6 +290,7 @@ function applyPersistedClassPolicies() {
     if (p.chatProviderKey) cls.allowedChatProviderKey = p.chatProviderKey;
     if (Array.isArray(p.chatModels) && p.chatModels.length) cls.allowedChatModels = p.chatModels;
     if (Array.isArray(p.imageModels)) cls.allowedImageModels = p.imageModels;
+    if ("imageProviderKey" in p) cls.allowedImageProviderKey = p.imageProviderKey;
     if (Array.isArray(p.keywordWhitelist)) cls.keywordWhitelist = p.keywordWhitelist;
     if (Array.isArray(p.keywordBlacklist)) cls.keywordBlacklist = p.keywordBlacklist;
   }
@@ -844,6 +845,7 @@ app.get("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
     okResp(req.id, {
       classId: cls.id,
       allowedChatProviderKey: cls.allowedChatProviderKey || null,
+      allowedImageProviderKey: cls.allowedImageProviderKey ?? null,
       allowedChatModels: cls.allowedChatModels || ["deepseek-v3"],
       allowedImageModels: cls.allowedImageModels || [],
     }),
@@ -852,9 +854,10 @@ app.get("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
 
 app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), (req, res) => {
   const schema = z.object({
-    chatModels: z.array(z.string().min(1)).min(1),
+    chatModels: z.array(z.string().min(1)).optional(),
     chatProviderKey: z.string().min(1).optional(),
     imageModels: z.array(z.string().min(1)).optional(),
+    imageProviderKey: z.union([z.string().min(1), z.null()]).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(errorResp("BAD_REQUEST", "Invalid payload", req.id));
@@ -862,19 +865,33 @@ app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
   if (!cls || cls.teacherId !== req.auth.sub) {
     return res.status(404).json(errorResp("CLASS_NOT_FOUND", "Class not found", req.id));
   }
-  cls.allowedChatModels = parsed.data.chatModels;
-  // Only update provider key when teacher explicitly sends a non-empty key.
-  // This prevents clearing providerKey accidentally when payload doesn't include it.
-  if (parsed.data.chatProviderKey) {
-    cls.allowedChatProviderKey = parsed.data.chatProviderKey;
+
+  const { chatModels, chatProviderKey, imageModels, imageProviderKey } = parsed.data;
+  const touched =
+    chatModels !== undefined ||
+    chatProviderKey !== undefined ||
+    imageModels !== undefined ||
+    imageProviderKey !== undefined;
+  if (!touched) {
+    return res.status(400).json(errorResp("BAD_REQUEST", "No policy fields to update", req.id));
   }
-  if (parsed.data.imageModels) cls.allowedImageModels = parsed.data.imageModels;
+
+  if (chatModels !== undefined) cls.allowedChatModels = chatModels;
+  if (chatProviderKey !== undefined) cls.allowedChatProviderKey = chatProviderKey;
+  if (imageModels !== undefined) cls.allowedImageModels = imageModels;
+  if (imageProviderKey !== undefined) cls.allowedImageProviderKey = imageProviderKey;
+
+  if (!cls.allowedChatModels?.length) {
+    cls.allowedChatModels = ["deepseek-v3"];
+  }
+
   const teacher = teacherFromAuth(req);
   if (teacher?.email) {
     upsertClassPolicyPersistent({
       teacherEmail: teacher.email,
       className: cls.className,
       chatProviderKey: cls.allowedChatProviderKey || null,
+      imageProviderKey: cls.allowedImageProviderKey ?? null,
       chatModels: cls.allowedChatModels || [],
       imageModels: cls.allowedImageModels || [],
       keywordWhitelist: cls.keywordWhitelist || [],
@@ -885,6 +902,7 @@ app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
     okResp(req.id, {
       classId: cls.id,
       allowedChatProviderKey: cls.allowedChatProviderKey || null,
+      allowedImageProviderKey: cls.allowedImageProviderKey ?? null,
       allowedChatModels: cls.allowedChatModels,
       allowedImageModels: cls.allowedImageModels || [],
     }),
@@ -956,6 +974,7 @@ app.put("/api/v1/classes/:classId/policies/keywords", authRequired("teacher"), (
       teacherEmail: teacher.email,
       className: cls.className,
       chatProviderKey: cls.allowedChatProviderKey || null,
+      imageProviderKey: cls.allowedImageProviderKey ?? null,
       chatModels: cls.allowedChatModels || [],
       imageModels: cls.allowedImageModels || [],
       keywordWhitelist: cls.keywordWhitelist || [],
@@ -1261,7 +1280,7 @@ app.get("/api/v1/ai/models", authRequired(), (req, res) => {
     const cls = classById(classId);
     if (cls) {
       if (endpoint === "image") {
-        const models = cls.allowedImageModels?.length ? cls.allowedImageModels : ["stable-image"];
+        const models = cls.allowedImageModels?.length ? cls.allowedImageModels : [];
         return res.json(okResp(req.id, { endpoint, models: models.map((m, i) => ({ id: m, displayName: m, isPrimary: i === 0 })) }));
       }
       if (endpoint === "chat") {
@@ -1378,10 +1397,11 @@ app.post("/api/v1/ai/chat/completions", authRequired("student"), async (req, res
   );
 });
 
-app.post("/api/v1/ai/images/generations", authRequired("student"), (req, res) => {
+app.post("/api/v1/ai/images/generations", authRequired("student"), async (req, res) => {
   const schema = z.object({
     classId: z.string().uuid(),
     prompt: z.string().min(3),
+    model: z.string().min(1).optional(),
     size: z.string().default("1024x1024"),
     n: z.number().int().min(1).max(4).default(1),
   });
@@ -1403,6 +1423,73 @@ app.post("/api/v1/ai/images/generations", authRequired("student"), (req, res) =>
   if (usage.images + parsed.data.n > cls.dailyImageQuota) {
     return res.status(429).json(errorResp("QUOTA_EXCEEDED_IMAGES", "Image quota exceeded", req.id));
   }
+
+  const allowedImage = cls.allowedImageModels?.length ? cls.allowedImageModels : [];
+  let selectedModel = parsed.data.model;
+  if (allowedImage.length) {
+    if (!selectedModel) selectedModel = allowedImage[0];
+    if (!allowedImage.includes(selectedModel)) {
+      return res
+        .status(403)
+        .json(errorResp("MODEL_NOT_ALLOWED", "Requested image model is not allowed for this class", req.id, { model: selectedModel }));
+    }
+  } else if (!selectedModel) {
+    selectedModel = "stable-image";
+  }
+
+  const imageProviderKey = cls.allowedImageProviderKey || cls.allowedChatProviderKey;
+  const stored = imageProviderKey ? db.systemProviderKeys[imageProviderKey] : null;
+  const catalog = imageProviderKey ? getProviderCatalogKey(imageProviderKey) : null;
+
+  if (stored?.apiKey && catalog && allowedImage.length && selectedModel && selectedModel !== "stable-image") {
+    try {
+      const baseUrl = stored.baseUrl || catalog.defaults?.baseUrl;
+      const t0 = Date.now();
+      const { imageUrl, b64, raw } = await callProviderTextToImage(imageProviderKey, {
+        apiKey: stored.apiKey,
+        baseUrl,
+        model: selectedModel,
+        prompt: parsed.data.prompt,
+        size: parsed.data.size,
+        n: parsed.data.n,
+      });
+      const latencyMs = Date.now() - t0;
+      db.usageLogs.push({
+        id: genId(),
+        requestId: req.id,
+        classId: cls.id,
+        studentId: student.id,
+        endpoint: "image",
+        selectedModel,
+        fallbackUsed: false,
+        promptTokens: 0,
+        completionTokens: 0,
+        imageCount: parsed.data.n,
+        costCny: Number((parsed.data.n * 0.02).toFixed(6)),
+        statusCode: 200,
+        latencyMs,
+        requestPayload: {
+          prompt: parsed.data.prompt,
+          size: parsed.data.size,
+          n: parsed.data.n,
+          model: selectedModel,
+        },
+        responsePayload: { imageUrl, hasB64: Boolean(b64), upstream: raw },
+        createdAt: nowIso(),
+      });
+      return res.json(
+        okResp(req.id, {
+          model: selectedModel,
+          imageUrl: imageUrl || undefined,
+          b64Json: b64 || undefined,
+          fallbackUsed: false,
+        }),
+      );
+    } catch (err) {
+      return res.status(502).json(errorResp("UPSTREAM_IMAGE_FAILED", String(err?.message || err), req.id));
+    }
+  }
+
   const jobId = `img_${randomCode(10)}`;
   db.usageLogs.push({
     id: genId(),
@@ -1410,21 +1497,20 @@ app.post("/api/v1/ai/images/generations", authRequired("student"), (req, res) =>
     classId: cls.id,
     studentId: student.id,
     endpoint: "image",
-    selectedModel: "stable-image",
-    fallbackUsed: false,
+    selectedModel,
+    fallbackUsed: true,
     promptTokens: 0,
     completionTokens: 0,
     imageCount: parsed.data.n,
     costCny: Number((parsed.data.n * 0.02).toFixed(6)),
     statusCode: 200,
     latencyMs: 180,
-    requestPayload: { prompt: parsed.data.prompt, size: parsed.data.size, n: parsed.data.n },
+    requestPayload: { prompt: parsed.data.prompt, size: parsed.data.size, n: parsed.data.n, model: selectedModel },
     responsePayload: { jobId, status: "processing", estimatedSeconds: 5 },
     createdAt: nowIso(),
   });
-  return res.json(okResp(req.id, { jobId, status: "processing", estimatedSeconds: 5 }, "queued"));
+  return res.json(okResp(req.id, { jobId, status: "processing", estimatedSeconds: 5, model: selectedModel }, "queued"));
 });
-
 app.get("/api/v1/ai/fun/providers", authRequired(), (req, res) => {
   return res.json(
     okResp(req.id, {

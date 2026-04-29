@@ -196,3 +196,48 @@ pre {
   border: 1px solid #cffafe;
 }
 
+.student-image-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.student-image-panel h3 {
+  margin: 0;
+}
+
+.student-image-preview {
+  min-height: 40px;
+  margin-top: 4px;
+}
+
+.student-image-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  margin-top: 8px;
+}
+
+.student-image-status {
+  font-size: 13px;
+  color: #4b5563;
+  padding: 8px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.student-image-panel.is-disabled .student-image-controls,
+.student-image-panel.is-disabled #student-image-prompt,
+.student-image-panel.is-disabled #student-image-submit-btn {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
