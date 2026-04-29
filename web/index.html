@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI4K12 Classroom</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>AI4K12 Classroom</h1>
+      <p>简洁认证流：身份选择 -> 登录/注册 -> 控制台</p>
+    </header>
+
+    <main>
+      <section class="card" id="entry-gateway">
+        <h2>选择入口</h2>
+        <div class="split-actions">
+          <button id="go-teacher-auth" class="secondary">教师端</button>
+          <button id="go-student-auth" class="secondary">学生端</button>
+        </div>
+      </section>
+
+      <section class="card hidden" id="teacher-auth">
+        <div class="auth-header">
+          <h2>教师身份验证</h2>
+          <div class="split-actions">
+            <button id="show-teacher-login" class="secondary">登录</button>
+            <button id="show-teacher-register" class="secondary">注册</button>
+            <button id="back-to-entry-1" class="ghost">返回</button>
+          </div>
+        </div>
+
+        <form id="teacher-login-form" class="auth-form">
+          <h3>教师登录</h3>
+          <input name="email" type="email" placeholder="邮箱" autocomplete="username" required />
+          <input name="password" type="password" placeholder="密码" autocomplete="current-password" required />
+          <button type="submit">进入教师管理台</button>
+        </form>
+
+        <form id="teacher-register-form" class="auth-form hidden">
+          <h3>教师注册</h3>
+          <input name="email" type="email" placeholder="邮箱" autocomplete="email" required />
+          <input name="password" type="password" placeholder="密码(>=8)" autocomplete="new-password" required />
+          <input name="fullName" type="text" placeholder="姓名" required />
+          <button type="submit">创建教师账号</button>
+        </form>
+      </section>
+
+      <section class="card hidden" id="student-auth">
+        <div class="auth-header">
+          <h2>学生登录</h2>
+          <div class="split-actions">
+            <button id="back-to-entry-2" class="ghost">返回</button>
+          </div>
+        </div>
+
+        <form id="student-join-login-form" class="auth-form hidden">
+          <h3>通过登录链接进入</h3>
+          <div id="student-join-class-info" style="margin: 8px 0; font-size: 13px; color: #6b7280;"></div>
+          <select id="student-join-select" required>
+            <option value="">请选择你的名字</option>
+          </select>
+          <button type="submit">选择并登录</button>
+        </form>
+
+        <form id="student-login-form" class="auth-form">
+          <input name="classId" type="text" placeholder="classId" required />
+          <input name="studentNo" type="text" placeholder="studentNo (如 S001)" required />
+          <input name="loginCode" type="text" placeholder="loginCode" required />
+          <button type="submit">进入学生工作台</button>
+        </form>
+      </section>
+
+      <section class="card hidden" id="teacher-dashboard">
+        <h2>教师管理台</h2>
+        <nav class="teacher-nav">
+          <button type="button" class="tab-btn" data-teacher-tab="setup">课堂设置</button>
+          <button type="button" class="tab-btn" data-teacher-tab="classes">年级/班级管理</button>
+          <button type="button" class="tab-btn" data-teacher-tab="students">学生管理</button>
+          <button type="button" class="tab-btn" data-teacher-tab="system">系统配置</button>
+        </nav>
+
+        <div class="table-card" data-tab="setup" id="teacher-setup-card">
+          <h3>课堂设置（生成登录链接）</h3>
+          <div class="toolbar">
+            <select id="setup-grade-select">
+              <option value="">请选择年级</option>
+            </select>
+            <select id="setup-class-select">
+              <option value="">请选择班级</option>
+            </select>
+            <button type="button" id="setup-generate-code-btn">生成班级登录码</button>
+            <span id="setup-expired-hint" class="total-badge" style="display: none;">即将过期</span>
+          </div>
+
+          <div class="toolbar">
+            <div style="flex: 1; min-width: 260px;">
+              <div class="toolbar" style="margin: 0;">
+                <span class="total-badge">joinCode</span>
+                <input id="setup-join-code" readonly style="flex: 1;" />
+              </div>
+              <div class="toolbar" style="margin: 6px 0 0;">
+                <span class="total-badge">teacherVerificationCode</span>
+                <input id="setup-verification-code" readonly style="flex: 1;" />
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <span class="total-badge">登录链接</span>
+            <textarea id="setup-login-link" readonly style="width: 100%; min-height: 60px;"></textarea>
+            <button type="button" id="copy-login-link-btn">复制</button>
+          </div>
+
+          <div class="toolbar">
+            <span class="total-badge">开放给学生的聊天模型</span>
+            <select id="setup-model-provider-select" style="min-width: 260px;">
+              <option value="">选择平台（需已在系统配置填 Key）</option>
+            </select>
+          </div>
+
+          <div class="toolbar">
+            <select id="setup-chat-model-select" style="flex: 1; min-width: 260px;">
+              <option value="">选择模型</option>
+            </select>
+            <button type="button" id="setup-open-model-btn">保存并开放</button>
+          </div>
+
+          <div class="toolbar">
+            <span id="setup-current-allowed-models" class="total-badge">当前：未配置</span>
+          </div>
+        </div>
+
+        <div class="table-card hidden" data-tab="system" id="teacher-system-card">
+          <h3>系统配置：填写主流大模型 Key 并拉取模型列表</h3>
+          <div class="toolbar">
+            <select id="system-provider-select" style="min-width: 260px;">
+              <option value="">选择平台</option>
+            </select>
+            <input id="system-api-key-input" type="password" placeholder="API Key（将用于拉取模型列表/调用）" style="flex: 1; min-width: 260px;" />
+          </div>
+          <div class="toolbar">
+            <input id="system-base-url-input" type="text" placeholder="可选：Base URL（如需要地区/自定义）" />
+            <button type="button" id="system-save-and-fetch-models-btn">保存并拉取模型列表</button>
+          </div>
+          <div class="toolbar">
+            <span class="total-badge">拉取结果</span>
+            <span id="system-fetch-hint" class="total-badge" style="display: none;">请求中…</span>
+          </div>
+          <pre id="system-model-results" style="min-height: 120px;"></pre>
+        </div>
+
+        <div class="grid">
+          <form id="grade-crud-form" data-tab="classes">
+            <h3>年级 CRUD</h3>
+            <select name="action">
+              <option value="create">新增</option>
+              <option value="update">修改</option>
+              <option value="delete">删除</option>
+              <option value="list">查询</option>
+            </select>
+            <input name="gradeId" type="text" placeholder="gradeId（修改/删除时填写）" />
+            <input name="name" type="text" placeholder="年级名称（如 Grade 7）" />
+            <button type="submit">执行</button>
+          </form>
+
+          <form id="class-create-form" data-tab="classes">
+            <h3>创建班级</h3>
+            <input name="className" type="text" placeholder="班级名" required />
+            <select name="gradeLevel" id="class-create-grade-select">
+              <option value="">请选择年级</option>
+            </select>
+            <input name="seatLimit" type="number" placeholder="席位数" value="50" min="1" max="500" />
+            <button type="submit">创建</button>
+          </form>
+
+          <form id="class-crud-form" data-tab="classes">
+            <h3>班级 CRUD</h3>
+            <select name="action">
+              <option value="list">查询</option>
+              <option value="detail">详情</option>
+              <option value="update">修改</option>
+              <option value="delete">删除</option>
+            </select>
+            <input name="classId" type="text" placeholder="classId" />
+            <input name="className" type="text" placeholder="新班级名（修改时）" />
+            <select name="gradeLevel" id="class-edit-grade-select">
+              <option value="">新年级（可选）</option>
+            </select>
+            <input name="seatLimit" type="number" placeholder="新席位（修改时）" min="1" max="500" />
+            <button type="submit">执行</button>
+          </form>
+
+          <form id="student-generate-form" data-tab="students">
+            <h3>批量生成学生</h3>
+            <input name="classId" type="text" placeholder="classId" required />
+            <input name="count" type="number" placeholder="数量" value="5" min="1" max="200" />
+            <button type="submit">生成</button>
+          </form>
+
+          <form id="student-import-form" data-tab="students">
+            <h3>名单导入（先选班级）</h3>
+            <select name="classId" id="import-class-select" required>
+              <option value="">请选择班级</option>
+            </select>
+            <textarea
+              name="studentsRaw"
+              placeholder="每行一个学生，支持：&#10;张三&#10;李四,S102"
+              required
+            ></textarea>
+            <button type="button" id="refresh-classes-btn">刷新班级列表</button>
+            <button type="submit">导入名单</button>
+          </form>
+
+          <form id="keyword-policy-form" data-tab="students">
+            <h3>关键词策略</h3>
+            <input name="classId" type="text" placeholder="classId" required />
+            <input name="whitelist" type="text" placeholder="白名单(逗号分隔)" />
+            <input name="blacklist" type="text" placeholder="黑名单(逗号分隔)" />
+            <button type="submit">保存策略</button>
+          </form>
+
+          <form id="student-ban-form" data-tab="students">
+            <h3>封禁/解封学生</h3>
+            <input name="classId" type="text" placeholder="classId" required />
+            <input name="studentId" type="text" placeholder="studentId" required />
+            <input name="reason" type="text" placeholder="封禁原因" />
+            <select name="action">
+              <option value="ban">封禁</option>
+              <option value="unban">解封</option>
+            </select>
+            <button type="submit">执行</button>
+          </form>
+
+          <form id="student-crud-form" data-tab="students">
+            <h3>学生 CRUD</h3>
+            <select name="action">
+              <option value="list">查询</option>
+              <option value="create">新增</option>
+              <option value="update">修改</option>
+              <option value="delete">删除</option>
+            </select>
+            <input name="classId" type="text" placeholder="classId" required />
+            <input name="studentId" type="text" placeholder="studentId（修改/删除）" />
+            <input name="displayName" type="text" placeholder="姓名（新增/修改）" />
+            <input name="studentNo" type="text" placeholder="学号（新增/修改）" />
+            <select name="status">
+              <option value="">状态（可选）</option>
+              <option value="active">active</option>
+              <option value="locked">locked</option>
+              <option value="disabled">disabled</option>
+            </select>
+            <button type="submit">执行</button>
+          </form>
+        </div>
+
+        <div class="table-card" data-tab="classes">
+          <h3>年级表（分页搜索）</h3>
+          <div class="toolbar">
+            <button type="button" id="refresh-grade-table">刷新</button>
+            <button type="button" id="grade-bulk-delete-btn">批量删除</button>
+            <span id="grade-total" class="total-badge">总数: 0</span>
+          </div>
+          <table id="grade-table">
+            <thead><tr><th><input type="checkbox" id="grade-check-all" /></th><th>gradeId</th><th>名称</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="table-card" data-tab="classes">
+          <h3>班级表（分页搜索）</h3>
+          <div class="toolbar">
+            <input id="class-search-input" placeholder="搜索班级/年级" />
+            <button type="button" id="class-search-btn">搜索</button>
+            <button type="button" id="class-prev-btn">上一页</button>
+            <button type="button" id="class-next-btn">下一页</button>
+            <button type="button" id="class-bulk-delete-btn">批量删除</button>
+            <span id="class-total" class="total-badge">总数: 0</span>
+          </div>
+          <table id="class-table">
+            <thead><tr><th><input type="checkbox" id="class-check-all" /></th><th>classId</th><th>班级</th><th>年级</th><th>席位</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="table-card" data-tab="students">
+          <h3>学生表（分页搜索）</h3>
+          <div class="toolbar">
+            <select id="student-grade-select">
+              <option value="">请选择年级</option>
+            </select>
+            <select id="student-class-id-select">
+              <option value="">请选择班级</option>
+            </select>
+            <input id="student-search-input" placeholder="搜索姓名/学号" />
+            <button type="button" id="student-search-btn">搜索</button>
+            <button type="button" id="student-prev-btn">上一页</button>
+            <button type="button" id="student-next-btn">下一页</button>
+            <button type="button" id="student-bulk-delete-btn">批量删除</button>
+            <span id="student-total" class="total-badge">总数: 0</span>
+          </div>
+          <table id="student-table">
+            <thead><tr><th><input type="checkbox" id="student-check-all" /></th><th>studentId</th><th>学号</th><th>姓名</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="table-card" data-tab="students" id="usage-log-card">
+          <h3>课堂交互日志（最近）</h3>
+          <div class="toolbar">
+            <input id="usage-limit-input" type="number" value="20" min="1" max="200" style="width: 140px;" />
+            <select id="usage-student-filter">
+              <option value="">全部学生</option>
+            </select>
+            <button type="button" id="usage-refresh-btn">刷新</button>
+          </div>
+          <table id="usage-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>学生</th>
+                <th>端点</th>
+                <th>模型</th>
+                <th>预览</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <pre id="usage-details" style="margin-top: 10px;"></pre>
+        </div>
+      </section>
+
+      <section class="card hidden" id="student-workspace">
+        <h2>学生工作台</h2>
+        <div class="grid">
+          <form id="student-chat-form">
+            <h3>AI 对话</h3>
+            <textarea name="prompt" placeholder="输入你的问题..." required></textarea>
+            <button type="submit">发送</button>
+          </form>
+
+          <form id="student-fun-form">
+            <h3>趣味功能</h3>
+            <input name="topic" type="text" placeholder="绘本主题" value="太阳系冒险" />
+            <input name="videoPrompt" type="text" placeholder="视频提示词" value="火山喷发科普动画" />
+            <button type="submit">生成绘本+视频任务</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>结果输出</h2>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/app.js"></script>
+  </body>
+  </html>
+

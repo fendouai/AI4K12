@@ -1,0 +1,168 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: #f7f8fb;
+  color: #1f2937;
+}
+header {
+  background: #111827;
+  color: #fff;
+  padding: 20px;
+}
+main {
+  max-width: 1100px;
+  margin: 20px auto;
+  padding: 0 16px;
+}
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+}
+.table-card {
+  margin-top: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  background: #f9fafb;
+  z-index: 1;
+}
+th, td {
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  padding: 8px;
+  font-size: 13px;
+}
+td input, td select {
+  width: 100%;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+.auth-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.split-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+input, textarea, select, button {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+}
+textarea {
+  min-height: 80px;
+}
+button {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+button:hover {
+  background: #1d4ed8;
+}
+.secondary {
+  background: #374151;
+}
+.secondary:hover {
+  background: #1f2937;
+}
+.ghost {
+  background: #e5e7eb;
+  color: #111827;
+}
+.ghost:hover {
+  background: #d1d5db;
+}
+.hidden {
+  display: none;
+}
+.auth-form {
+  max-width: 420px;
+}
+.teacher-nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.tab-btn {
+  background: #374151;
+  color: #fff;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.tab-btn:hover {
+  background: #1f2937;
+}
+.tab-btn.active {
+  background: #2563eb;
+}
+.total-badge {
+  font-size: 12px;
+  color: #4b5563;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  background: #111827;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+pre {
+  margin: 0;
+  background: #0b1020;
+  color: #d1fae5;
+  padding: 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
