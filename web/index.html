@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>AI4K12 Classroom</h1>
-      <p>简洁认证流：教师登录/注册 -> 控制台（学生走网址直接登录）</p>
+      <p>简洁认证流：教师登录/注册 → 管理台；<strong>学生请使用教师下发的班级登录链接</strong>进入。</p>
     </header>
 
     <main>
@@ -44,6 +44,11 @@
           <div class="split-actions"></div>
         </div>
 
+        <div id="student-link-hint" class="auth-form hidden">
+          <p><strong>请使用教师分享的本班登录链接</strong>，用浏览器打开后即可选择姓名登录。</p>
+          <p style="margin-top: 8px; font-size: 13px; color: #6b7280;">链接无效或过期时请向任课教师索取新链接。</p>
+        </div>
+
         <form id="student-join-login-form" class="auth-form hidden">
           <h3>通过登录链接进入</h3>
           <div id="student-join-class-info" style="margin: 8px 0; font-size: 13px; color: #6b7280;"></div>
@@ -52,17 +57,15 @@
           </select>
           <button type="submit">选择并登录</button>
         </form>
-
-        <form id="student-login-form" class="auth-form">
-          <input name="classId" type="text" placeholder="classId" required />
-          <input name="studentNo" type="text" placeholder="studentNo (如 S001)" required />
-          <input name="loginCode" type="text" placeholder="loginCode" required />
-          <button type="submit">进入学生工作台</button>
-        </form>
       </section>
 
       <section class="card hidden" id="teacher-dashboard">
-        <h2>教师管理台</h2>
+        <div class="auth-header">
+          <h2>教师管理台</h2>
+          <div class="split-actions">
+            <button type="button" id="teacher-logout-btn" class="secondary">退出登录</button>
+          </div>
+        </div>
         <nav class="teacher-nav">
           <button type="button" class="tab-btn" data-teacher-tab="setup">课堂设置</button>
           <button type="button" class="tab-btn" data-teacher-tab="classes">年级/班级管理</button>
@@ -115,6 +118,9 @@
             </select>
             <button type="button" id="setup-open-model-btn">保存并开放</button>
           </div>
+          <div class="toolbar">
+            <input id="setup-chat-model-manual" type="text" placeholder="拉取失败时可手动填写模型名，例如 deepseek-chat" style="flex: 1; min-width: 260px;" />
+          </div>
 
           <div class="toolbar">
             <span id="setup-current-allowed-models" class="total-badge">当前：未配置</span>
@@ -124,14 +130,23 @@
         <div class="table-card hidden" data-tab="system" id="teacher-system-card">
           <h3>系统配置：填写主流大模型 Key 并拉取模型列表</h3>
           <div class="toolbar">
+            <input id="system-public-base-url-input" type="text" placeholder="学生登录链接 Base URL（留空默认使用局域网IP:端口）" style="flex: 1; min-width: 260px;" />
+            <button type="button" id="system-save-public-base-url-btn">保存链接地址</button>
+          </div>
+          <div class="toolbar">
+            <input id="system-public-domain-input" type="text" placeholder="域名（可不带协议，例如 ai.example.com）" style="flex: 1; min-width: 220px;" />
+            <input id="system-public-ip-input" type="text" placeholder="公网/固定IP（IPv4）" style="flex: 1; min-width: 220px;" />
+            <button type="button" id="system-save-domain-ip-btn">保存域名/IP</button>
+          </div>
+          <div class="toolbar">
             <select id="system-provider-select" style="min-width: 260px;">
               <option value="">选择平台</option>
             </select>
-            <input id="system-api-key-input" type="password" placeholder="API Key（将用于拉取模型列表/调用）" style="flex: 1; min-width: 260px;" />
+            <input id="system-api-key-input" type="password" placeholder="API Key（可选；留空则使用已保存的 Key）" style="flex: 1; min-width: 260px;" />
           </div>
           <div class="toolbar">
             <input id="system-base-url-input" type="text" placeholder="可选：Base URL（如需要地区/自定义）" />
-            <button type="button" id="system-save-and-fetch-models-btn">保存并拉取模型列表</button>
+            <button type="button" id="system-save-and-fetch-models-btn">保存（可选）并拉取模型列表</button>
           </div>
           <div class="toolbar">
             <span class="total-badge">拉取结果</span>
@@ -322,26 +337,19 @@
 
       <section class="card hidden" id="student-workspace">
         <h2>学生工作台</h2>
-        <div class="grid">
-          <form id="student-chat-form">
-            <h3>AI 对话</h3>
-            <div class="toolbar">
-              <span class="total-badge">可用模型</span>
-              <select id="student-chat-model-select" style="flex: 1; min-width: 240px;">
-                <option value="">加载中…</option>
-              </select>
-            </div>
-            <textarea name="prompt" placeholder="输入你的问题..." required></textarea>
-            <button type="submit">发送</button>
-          </form>
-
-          <form id="student-fun-form">
-            <h3>趣味功能</h3>
-            <input name="topic" type="text" placeholder="绘本主题" value="太阳系冒险" />
-            <input name="videoPrompt" type="text" placeholder="视频提示词" value="火山喷发科普动画" />
-            <button type="submit">生成绘本+视频任务</button>
-          </form>
-        </div>
+        <form id="student-chat-form">
+          <h3>AI 对话</h3>
+          <div class="toolbar">
+            <span class="total-badge">可用模型</span>
+            <select id="student-chat-model-select" style="flex: 1; min-width: 240px;">
+              <option value="">加载中…</option>
+            </select>
+            <button type="button" class="ghost" id="student-chat-clear-btn">清空会话</button>
+          </div>
+          <div id="student-chat-history" class="chat-history"></div>
+          <textarea name="prompt" placeholder="输入你的问题..." required></textarea>
+          <button type="submit">发送</button>
+        </form>
       </section>
 
       <section class="card">

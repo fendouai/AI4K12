@@ -5,7 +5,7 @@
 面向中小学课堂场景的 AI 教学平台示例项目。  
 后端基于 Node.js + Express，提供教师端班级管理、学生接入、课堂模型策略、限额与风控、AI 能力网关（文本/图片/绘本/视频）等能力；前端提供一个可直接演示全流程的单页控制台。
 
-> 当前定位是 **MVP/演示工程**：数据为内存存储，适合产品验证与接口联调，不建议直接用于生产环境。
+> 当前定位是 **MVP/演示工程**：业务数据仍以内存存储为主；系统配置（`publicBaseUrl`）与 Provider Key 已支持 SQLite 本地持久化。
 
 ---
 
@@ -14,7 +14,7 @@
 本项目围绕 `K12_AI_Classroom_Product_Requirement_CN.md` 的核心目标落地：
 
 - 教师注册登录后创建班级，默认支持 50 席位
-- 学生通过班级码/登录码快速接入，不依赖手机号
+- 学生通过 **教师下发的登录链接**（或后端 `login-by-code` 接口）快速接入，不依赖手机号
 - 教师可控制学生可用模型、关键词策略、子账号限额和封禁
 - 提供课堂 AI 能力入口并记录可审计的使用日志
 - 支持趣味功能扩展（绘本/视频异步任务形态）
@@ -43,14 +43,10 @@
 
 ### 学生端
 
-- 通过班级码加入（`joinCode + teacherVerificationCode`）
-- 通过 `classId + studentNo + loginCode` 登录
-- 登录链接免手输流程（公开 roster + 一键选人登录）
+- **使用教师生成的班级登录链接**（`joinCode + teacherVerificationCode`）：打开链接后在名单中选择本人姓名登录
+- 后端仍提供 `classId + studentNo + loginCode` 接口（`POST /student/login-by-code`），供集成与测试；演示前端不再提供手填入口
 - 首次改密（可选）
-- AI 文本对话
-- 图片生成（异步任务）
-- 绘本生成（异步任务）
-- 视频生成（异步任务）
+- AI 文本对话（演示前端主推能力）
 
 ### 安全与治理
 
@@ -87,6 +83,10 @@ AI4K12/
 │   ├── config.js       # 运行配置
 │   ├── providers.js    # Provider 目录、模型拉取、Key 管理
 │   └── store.js        # 内存数据库与用量聚合方法
+├── docs/
+│   └── screenshots/  # README 界面截图（可 npm run screenshots 局部重导）
+├── scripts/
+│   └── capture-ui-screenshots.mjs
 ├── web/
 │   ├── index.html      # 教师/学生演示控制台
 │   ├── app.js          # 前端交互逻辑
@@ -123,6 +123,57 @@ npm run dev
 curl http://localhost:3000/health
 ```
 
+### 5.4 界面截图（演示）
+
+下图使用默认教师账号 `admin@laoshibao.com` / `admin@laoshibao.com` 在本地启动后采集；**学生端仅通过教师下发的登录链接**（页面 URL 携带 `joinCode` 与 `teacherVerificationCode`）进入。PNG 源文件放在 `docs/screenshots/`。
+
+**教师端**
+
+![教师登录](docs/screenshots/01-teacher-login.png)
+
+教师登录页：邮箱与密码登录后进入管理台（会话会写入浏览器本地存储，刷新可保持登录）。
+
+![课堂设置](docs/screenshots/02-teacher-setup.png)
+
+**课堂设置**：选择年级/班级，生成/复制 joinCode、教师验证码与登录链接，并配置对学生开放的聊天模型。
+
+![年级与班级管理](docs/screenshots/03-teacher-grades-classes.png)
+
+**年级/班级管理**：年级与班级的创建、查询、修改、删除及分页检索。
+
+![学生管理](docs/screenshots/04-teacher-students.png)
+
+**学生管理**：批量生成、名单导入、关键词与封禁策略、学生 CRUD；上方为常用工具区，向下滚动可见学生表与课堂日志。
+
+![课堂交互日志](docs/screenshots/05-teacher-usage-log.png)
+
+**课堂交互日志**（与学生表同属「学生管理」标签页下方）：按时间查看学生调用记录与模型等摘要。
+
+![系统配置](docs/screenshots/06-teacher-system.png)
+
+**系统配置**：学生登录链接 Base URL、域名/IP，以及各模型平台的 API Key 与拉取模型列表。
+
+**学生端**
+
+![教师生成的登录链接入口](docs/screenshots/07-student-join-link.png)
+
+**登录链接**：由教师在「课堂设置」生成；学生在浏览器中打开该链接，在班级名单中点选自己的姓名并登录（无需输入 classId / 登录码）。
+
+![学生工作台 · AI 对话](docs/screenshots/08-student-workspace.png)
+
+**学生工作台**：选择允许使用的模型后与 AI 对话（支持清空会话与多轮上下文）。
+
+**重新生成截图（可选）**
+
+另开终端启动 `npm run dev` 后执行：
+
+```bash
+npx playwright install chromium   # 首次需要
+npm run screenshots
+```
+
+可通过环境变量覆盖默认值：`AI4K12_BASE_URL`、`AI4K12_JOIN_CODE`、`AI4K12_TEACHER_VERIFICATION_CODE`（须与当前运行实例中该班级的码一致）。
+
 ---
 
 ## 6. 默认演示数据
@@ -130,10 +181,10 @@ curl http://localhost:3000/health
 服务启动时（`NODE_ENV !== test`）会自动初始化演示数据：
 
 - 默认教师账号：
-  - `email`: `fendouai@gmail.com`
-  - `password`: `wo2010WO`
+  - `email`: `admin@laoshibao.com`
+  - `password`: `admin@laoshibao.com`
 - 自动生成 12 个年级与对应 A 班
-- 自动为 `初中1年级A班` 生成 50 个学生
+- 自动为 `初中1年级A班` 生成 50 个学生（用于教师登录链接中的「选择姓名」名单演示）
 
 另外提供开发用重置接口：
 
@@ -148,6 +199,11 @@ curl http://localhost:3000/health
 | 变量名 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PORT` | `3000` | 服务端口 |
+| `HOST` | `0.0.0.0` | 服务绑定地址 |
+| `PUBLIC_BASE_URL` | 自动检测局域网IP | 默认学生登录链接地址 |
+| `PUBLIC_DOMAIN` | - | 对外访问域名（未带协议时默认按 HTTPS 处理） |
+| `PUBLIC_IP` | - | 对外访问 IP（IPv4） |
+| `CONFIG_DB_PATH` | `data/ai4k12.db` | 系统配置持久化 SQLite 路径 |
 | `JWT_SECRET` | `dev-secret-change-in-prod` | JWT 签名密钥（生产必须替换） |
 | `NODE_ENV` | - | `test` 时会禁用自动 seed |
 
@@ -309,6 +365,7 @@ npm run test:coverage
 - `npm test`：运行测试
 - `npm run test:coverage`：运行测试并生成覆盖率报告
 - `npm run test:watch`：watch 模式测试
+- `npm run screenshots`：在本地服务已启动时，用 Playwright 重导 `docs/screenshots/` 中学生端相关截图（见 **5.4**）
 
 ---
 

@@ -1,9 +1,10 @@
 import app from "./app.js";
+import { config, resolvePublicBaseUrl } from "./config.js";
 
-const port = Number(process.env.PORT || 3000);
+const publicBaseUrl = resolvePublicBaseUrl();
 
-app.listen(port, () => {
+app.listen(config.port, config.host, () => {
   // eslint-disable-next-line no-console
-  console.log(`AI4K12 MVP service running at http://localhost:${port}`);
+  console.log(`AI4K12 MVP service running at ${publicBaseUrl} (bind ${config.host}:${config.port})`);
 });
 

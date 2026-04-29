@@ -15,6 +15,10 @@ const state = {
   setupAllClasses: [],
   setupAllowedChatModels: [],
   usageItems: [],
+  systemPublicBaseUrl: "",
+  systemPublicDomain: "",
+  systemPublicIp: "",
+  studentChatMessages: [],
 };
 
 const output = document.getElementById("output");
@@ -34,6 +38,11 @@ const systemBaseUrlInput = document.getElementById("system-base-url-input");
 const systemSaveAndFetchModelsBtn = document.getElementById("system-save-and-fetch-models-btn");
 const systemFetchHint = document.getElementById("system-fetch-hint");
 const systemModelResults = document.getElementById("system-model-results");
+const systemPublicBaseUrlInput = document.getElementById("system-public-base-url-input");
+const systemSavePublicBaseUrlBtn = document.getElementById("system-save-public-base-url-btn");
+const systemPublicDomainInput = document.getElementById("system-public-domain-input");
+const systemPublicIpInput = document.getElementById("system-public-ip-input");
+const systemSaveDomainIpBtn = document.getElementById("system-save-domain-ip-btn");
 const teacherTabsRoot = document.getElementById("teacher-dashboard");
 const setupGradeSelect = document.getElementById("setup-grade-select");
 const setupClassSelect = document.getElementById("setup-class-select");
@@ -44,14 +53,18 @@ const setupLoginLinkArea = document.getElementById("setup-login-link");
 const copyLoginLinkBtn = document.getElementById("copy-login-link-btn");
 const setupModelProviderSelect = document.getElementById("setup-model-provider-select");
 const setupChatModelSelect = document.getElementById("setup-chat-model-select");
+const setupChatModelManualInput = document.getElementById("setup-chat-model-manual");
 const setupOpenModelBtn = document.getElementById("setup-open-model-btn");
 const setupCurrentAllowedModelsEl = document.getElementById("setup-current-allowed-models");
 const studentJoinLoginForm = document.getElementById("student-join-login-form");
 const studentJoinClassInfo = document.getElementById("student-join-class-info");
 const studentJoinSelect = document.getElementById("student-join-select");
+const studentLinkHint = document.getElementById("student-link-hint");
 const toastEl = document.getElementById("toast");
 
 const studentChatModelSelect = document.getElementById("student-chat-model-select");
+const studentChatHistory = document.getElementById("student-chat-history");
+const studentChatClearBtn = document.getElementById("student-chat-clear-btn");
 
 const usageLimitInput = document.getElementById("usage-limit-input");
 const usageStudentFilter = document.getElementById("usage-student-filter");
@@ -78,6 +91,46 @@ async function api(path, method = "GET", body, token) {
   const json = await res.json();
   if (!res.ok) throw json;
   return json;
+}
+
+const TEACHER_TOKEN_STORAGE_KEY = "ai4k12.v1.teacherAccessToken";
+
+function setPersistedTeacherToken(token) {
+  if (token) localStorage.setItem(TEACHER_TOKEN_STORAGE_KEY, token);
+  else localStorage.removeItem(TEACHER_TOKEN_STORAGE_KEY);
+}
+
+function isStudentJoinUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return Boolean(params.get("joinCode")?.trim() && params.get("teacherVerificationCode")?.trim());
+}
+
+async function initializeTeacherDashboardUI() {
+  await refreshTeacherClasses();
+  await refreshGradeOptions();
+  await renderGradeTable();
+  await renderClassTable();
+  await refreshStudentGradeClassSelects();
+  showSection(teacherDashboard);
+  await refreshTeacherSetupSelects();
+  await loadSystemSettings();
+  setTeacherTab("setup");
+  await loadSetupModelProviders().catch((e) => log(e));
+  await refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
+}
+
+async function restoreTeacherSessionIfNeeded() {
+  if (isStudentJoinUrl()) return;
+  const token = localStorage.getItem(TEACHER_TOKEN_STORAGE_KEY);
+  if (!token) return;
+  try {
+    await api("/api/v1/grades", "GET", undefined, token);
+    state.teacherToken = token;
+    await initializeTeacherDashboardUI();
+  } catch {
+    setPersistedTeacherToken(null);
+    state.teacherToken = "";
+  }
 }
 
 function list(value) {
@@ -358,6 +411,31 @@ async function loadStudentChatModels() {
   }
 }
 
+function resetStudentChat() {
+  state.studentChatMessages = [];
+  renderStudentChatHistory();
+}
+
+function renderStudentChatHistory() {
+  if (!studentChatHistory) return;
+  studentChatHistory.innerHTML = "";
+  if (!state.studentChatMessages.length) {
+    const empty = document.createElement("div");
+    empty.className = "chat-message assistant";
+    empty.textContent = "开始提问吧，系统会保留当前会话上下文。";
+    studentChatHistory.appendChild(empty);
+    return;
+  }
+  for (const m of state.studentChatMessages) {
+    const row = document.createElement("div");
+    row.className = `chat-message ${m.role === "user" ? "user" : "assistant"}`;
+    const prefix = m.role === "user" ? "你：" : "AI：";
+    row.textContent = `${prefix}${m.content}`;
+    studentChatHistory.appendChild(row);
+  }
+  studentChatHistory.scrollTop = studentChatHistory.scrollHeight;
+}
+
 function showSection(sectionId) {
   [entryGateway, teacherAuth, studentAuth, teacherDashboard, studentWorkspace].forEach((el) => el && el.classList.add("hidden"));
   sectionId.classList.remove("hidden");
@@ -444,7 +522,7 @@ async function loadSetupChatModels(providerKey) {
       setupChatModelSelect.appendChild(opt);
     }
   } catch (e) {
-    toast(e?.code ? e.code : "拉取模型失败");
+    toast("拉取模型失败，可手动填写模型名");
     // Keep empty list; user can retry after saving keys.
   }
 
@@ -453,6 +531,23 @@ async function loadSetupChatModels(providerKey) {
   const primary = allowed[0];
   if (primary && Array.from(setupChatModelSelect.options).some((o) => o.value === primary)) {
     setupChatModelSelect.value = primary;
+  }
+}
+
+async function loadSystemSettings() {
+  if (!state.teacherToken) return;
+  try {
+    const ret = await api("/api/v1/system/settings", "GET", undefined, state.teacherToken);
+    state.systemPublicBaseUrl = ret?.data?.publicBaseUrl || "";
+    state.systemPublicDomain = ret?.data?.publicDomain || "";
+    state.systemPublicIp = ret?.data?.publicIp || "";
+    if (systemPublicBaseUrlInput) {
+      systemPublicBaseUrlInput.value = state.systemPublicBaseUrl;
+    }
+    if (systemPublicDomainInput) systemPublicDomainInput.value = state.systemPublicDomain;
+    if (systemPublicIpInput) systemPublicIpInput.value = state.systemPublicIp;
+  } catch (e) {
+    log(e);
   }
 }
 
@@ -510,7 +605,8 @@ async function generateJoinLink() {
   setupJoinCodeInput.value = joinCode;
   setupVerificationCodeInput.value = teacherVerificationCode;
 
-  const link = `${window.location.origin}${window.location.pathname}?joinCode=${encodeURIComponent(joinCode)}&teacherVerificationCode=${encodeURIComponent(teacherVerificationCode)}`;
+  const baseUrl = (state.systemPublicBaseUrl || window.location.origin || "").replace(/\/+$/, "");
+  const link = `${baseUrl}${window.location.pathname}?joinCode=${encodeURIComponent(joinCode)}&teacherVerificationCode=${encodeURIComponent(teacherVerificationCode)}`;
   setupLoginLinkArea.value = link;
   toast("登录链接已生成");
 }
@@ -525,7 +621,10 @@ document.querySelectorAll("#teacher-dashboard button.tab-btn[data-teacher-tab]")
   btn.addEventListener("click", () => {
     const tab = btn.dataset.teacherTab;
     setTeacherTab(tab);
-    if (tab === "system") loadSystemProviders().catch((e) => log(e));
+    if (tab === "system") {
+      loadSystemProviders().catch((e) => log(e));
+      loadSystemSettings().catch((e) => log(e));
+    }
     if (tab === "setup") loadSetupModelProviders().catch((e) => log(e));
   });
 });
@@ -561,7 +660,7 @@ setupOpenModelBtn?.addEventListener("click", async () => {
   try {
     const classId = setupClassSelect?.value || state.setupClassId;
     if (!classId) return toast("请先选择班级");
-    const selectedModel = setupChatModelSelect?.value;
+    const selectedModel = setupChatModelSelect?.value || setupChatModelManualInput?.value?.trim();
     const selectedProviderKey = setupModelProviderSelect?.value || undefined;
     if (!selectedModel) return toast("请选择要开放的聊天模型");
 
@@ -601,21 +700,29 @@ async function loadSystemProviders() {
 async function saveAndFetchModels() {
   if (!systemProviderSelect) return;
   const providerKey = systemProviderSelect.value;
-  const apiKey = systemApiKeyInput.value;
+  const apiKey = systemApiKeyInput.value.trim();
   const baseUrl = systemBaseUrlInput.value || undefined;
   if (!providerKey) return toast("请选择平台");
-  if (!apiKey) return toast("请填写 API Key");
   systemFetchHint && (systemFetchHint.style.display = "inline");
   systemModelResults.textContent = "";
   try {
-    await api(`/api/v1/system/providers/${providerKey}/keys`, "PUT", { apiKey, baseUrl }, state.teacherToken);
+    // API Key is optional here:
+    // - when provided: update persisted key then fetch models
+    // - when empty: directly fetch models with existing persisted key
+    if (apiKey) {
+      await api(`/api/v1/system/providers/${providerKey}/keys`, "PUT", { apiKey, baseUrl }, state.teacherToken);
+    }
     const modelsRet = await api(`/api/v1/system/providers/${providerKey}/models`, "GET", undefined, state.teacherToken);
     const models = modelsRet.data.models || [];
     systemModelResults.textContent = JSON.stringify(models, null, 2);
-    toast(`已拉取 ${models.length} 个模型`);
+    toast(apiKey ? `已保存并拉取 ${models.length} 个模型` : `已使用已保存 Key 拉取 ${models.length} 个模型`);
   } catch (e) {
     systemModelResults.textContent = JSON.stringify(e, null, 2);
-    toast(e?.code ? e.code : "拉取模型失败");
+    if (!apiKey && e?.code === "PROVIDER_KEY_MISSING") {
+      toast("未找到已保存的 Key，请先填写并保存一次");
+    } else {
+      toast(e?.code ? e.code : "拉取模型失败");
+    }
   } finally {
     systemFetchHint && (systemFetchHint.style.display = "none");
   }
@@ -623,6 +730,42 @@ async function saveAndFetchModels() {
 
 systemSaveAndFetchModelsBtn?.addEventListener("click", () => {
   saveAndFetchModels().catch((e) => log(e));
+});
+
+systemSavePublicBaseUrlBtn?.addEventListener("click", async () => {
+  try {
+    const v = systemPublicBaseUrlInput?.value?.trim() || "";
+    const payload = { publicBaseUrl: v || null };
+    const ret = await api("/api/v1/system/settings", "PUT", payload, state.teacherToken);
+    state.systemPublicBaseUrl = ret?.data?.publicBaseUrl || "";
+    if (systemPublicBaseUrlInput) systemPublicBaseUrlInput.value = state.systemPublicBaseUrl;
+    toast("链接地址已保存");
+  } catch (e) {
+    toast(e?.code ? e.code : "保存失败");
+    log(e);
+  }
+});
+
+systemSaveDomainIpBtn?.addEventListener("click", async () => {
+  try {
+    const domain = systemPublicDomainInput?.value?.trim() || "";
+    const ip = systemPublicIpInput?.value?.trim() || "";
+    const payload = {
+      publicDomain: domain || null,
+      publicIp: ip || null,
+    };
+    const ret = await api("/api/v1/system/settings", "PUT", payload, state.teacherToken);
+    state.systemPublicBaseUrl = ret?.data?.publicBaseUrl || "";
+    state.systemPublicDomain = ret?.data?.publicDomain || "";
+    state.systemPublicIp = ret?.data?.publicIp || "";
+    if (systemPublicBaseUrlInput) systemPublicBaseUrlInput.value = state.systemPublicBaseUrl;
+    if (systemPublicDomainInput) systemPublicDomainInput.value = state.systemPublicDomain;
+    if (systemPublicIpInput) systemPublicIpInput.value = state.systemPublicIp;
+    toast("域名/IP 已保存");
+  } catch (e) {
+    toast(e?.code ? e.code : "保存失败");
+    log(e);
+  }
 });
 
 const teacherLoginForm = document.getElementById("teacher-login-form");
@@ -653,19 +796,9 @@ document.getElementById("teacher-login-form").addEventListener("submit", async (
   try {
     const ret = await api("/api/v1/teacher/login", "POST", { email: f.email.value, password: f.password.value });
     state.teacherToken = ret.data.accessToken;
-    await refreshTeacherClasses();
-    await refreshGradeOptions();
-    await renderGradeTable();
-    await renderClassTable();
-    await refreshStudentGradeClassSelects();
+    setPersistedTeacherToken(ret.data.accessToken);
+    await initializeTeacherDashboardUI();
     toast("登录成功");
-    showSection(teacherDashboard);
-    await refreshTeacherSetupSelects();
-    setTeacherTab("setup");
-    // Ensure setup model controls have provider list loaded.
-    await loadSetupModelProviders().catch((e) => log(e));
-    await refreshSetupAllowedModelsFromPolicy().catch((e) => log(e));
-    // Lazy load system providers when user enters system tab.
     log(ret);
   } catch (err) {
     log(err);
@@ -958,21 +1091,6 @@ document.getElementById("student-bulk-delete-btn").addEventListener("click", asy
   toast(`已批量删除 ${ids.length} 个学生`);
 });
 
-document.getElementById("student-login-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  try {
-    const ret = await api("/api/v1/student/login-by-code", "POST", { classId: f.classId.value, studentNo: f.studentNo.value, loginCode: f.loginCode.value });
-    state.studentToken = ret.data.accessToken;
-    state.classId = f.classId.value;
-    showSection(studentWorkspace);
-    await loadStudentChatModels().catch((err) => log(err));
-    log(ret);
-  } catch (err) {
-    log(err);
-  }
-});
-
 // Join-login via teacher-generated link (public join)
 if (studentJoinLoginForm) {
   studentJoinLoginForm.addEventListener("submit", async (e) => {
@@ -989,6 +1107,7 @@ if (studentJoinLoginForm) {
       });
       state.studentToken = ret.data.accessToken;
       state.classId = ret.data.student.classId;
+      resetStudentChat();
       showSection(studentWorkspace);
       await loadStudentChatModels().catch((err) => log(err));
       toast("已登录学生账号");
@@ -1001,43 +1120,56 @@ if (studentJoinLoginForm) {
   });
 }
 
+studentChatClearBtn?.addEventListener("click", () => {
+  resetStudentChat();
+  toast("会话已清空");
+});
+
 document.getElementById("student-chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
+  const prompt = String(f.prompt.value || "").trim();
+  if (!prompt) return;
+  state.studentChatMessages.push({ role: "user", content: prompt });
+  renderStudentChatHistory();
+  f.prompt.value = "";
   try {
     const selectedModel = studentChatModelSelect?.value || undefined;
+    const messages = state.studentChatMessages.map((m) => ({ role: m.role, content: m.content }));
     const ret = await api(
       "/api/v1/ai/chat/completions",
       "POST",
-      { classId: state.classId, model: selectedModel || undefined, messages: [{ role: "user", content: f.prompt.value }] },
+      { classId: state.classId, model: selectedModel || undefined, messages },
       state.studentToken,
     );
     if (ret?.data?.outputText) {
+      state.studentChatMessages.push({ role: "assistant", content: ret.data.outputText });
+      renderStudentChatHistory();
       output.textContent = ret.data.outputText;
       toast("回复已生成");
     } else {
       log(ret);
     }
   } catch (err) {
+    state.studentChatMessages.push({ role: "assistant", content: `请求失败：${err?.message || err?.code || "发送失败"}` });
+    renderStudentChatHistory();
     log(err);
     toast(err?.code ? err.code : "发送失败");
   }
 });
 
-document.getElementById("student-fun-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  try {
-    const storybook = await api("/api/v1/ai/storybooks/generations", "POST", { classId: state.classId, topic: f.topic.value, pages: 6, style: "comic" }, state.studentToken);
-    const video = await api("/api/v1/ai/videos/generations", "POST", { classId: state.classId, prompt: f.videoPrompt.value, durationSeconds: 6 }, state.studentToken);
-    log({ storybook, video });
-  } catch (err) {
-    log(err);
-  }
+renderStudentChatHistory();
+
+document.getElementById("teacher-logout-btn")?.addEventListener("click", () => {
+  state.teacherToken = "";
+  setPersistedTeacherToken(null);
+  showSection(teacherAuth);
+  toast("已退出登录");
 });
 
-// Auto-load student join-link flow from URL query
+// Restore teacher session (after refresh), then optional student join-link flow from URL query
 (async () => {
+  await restoreTeacherSessionIfNeeded();
   try {
     const params = new URLSearchParams(window.location.search);
     const joinCode = params.get("joinCode");
@@ -1048,10 +1180,8 @@ document.getElementById("student-fun-form").addEventListener("submit", async (e)
     state.joinCode = joinCode;
     state.teacherVerificationCode = teacherVerificationCode;
 
-    // Switch to student auth/join panel
+    studentLinkHint?.classList.add("hidden");
     studentJoinLoginForm.classList.remove("hidden");
-    const studentLoginFormEl = document.getElementById("student-login-form");
-    if (studentLoginFormEl) studentLoginFormEl.classList.add("hidden");
 
     studentJoinClassInfo.textContent = "正在加载班级名单...";
     showSection(studentAuth);
@@ -1077,7 +1207,9 @@ document.getElementById("student-fun-form").addEventListener("submit", async (e)
     studentJoinClassInfo.textContent = `班级：${rosterJson.data.className}`;
   } catch (e) {
     toast(e?.code ? e.code : "无法加载登录链接信息");
-    // keep the normal student login panel
+    studentJoinLoginForm?.classList.add("hidden");
+    studentLinkHint?.classList.remove("hidden");
+    showSection(studentAuth);
   }
 })();
 

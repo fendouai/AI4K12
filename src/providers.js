@@ -1,4 +1,5 @@
 import { db } from "./store.js";
+import { upsertProviderKeyPersistent } from "./system-config-db.js";
 
 const providerCatalog = {
   siliconflow: {
@@ -37,6 +38,7 @@ const providerCatalog = {
   moonshot: {
     name: "Moonshot / Kimi",
     kind: "openai_compatible",
+    defaults: { baseUrl: "https://api.moonshot.ai" },
     listModels: async ({ apiKey }) => {
       const url = "https://api.moonshot.ai/v1/models";
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
@@ -53,6 +55,7 @@ const providerCatalog = {
   deepseek: {
     name: "DeepSeek",
     kind: "openai_compatible",
+    defaults: { baseUrl: "https://api.deepseek.com" },
     listModels: async ({ apiKey }) => {
       const url = "https://api.deepseek.com/models";
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
@@ -127,6 +130,7 @@ export function upsertProviderKey(providerKey, { apiKey, baseUrl }) {
   const provider = providerCatalog[providerKey];
   if (!provider) throw new Error("UNKNOWN_PROVIDER");
   db.systemProviderKeys[providerKey] = { apiKey, baseUrl, updatedAt: new Date().toISOString() };
+  upsertProviderKeyPersistent(providerKey, { apiKey, baseUrl });
 }
 
 export function getProviderCatalogKey(providerKey) {

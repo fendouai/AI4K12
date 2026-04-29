@@ -11,7 +11,7 @@ A practical MVP that helps teachers create classes, onboard students in minutes,
 Most general AI tools are not designed for real classrooms.  
 AI4K12 focuses on classroom-first workflows:
 
-- **Fast onboarding**: class join codes + student login codes, no phone number required
+- **Fast onboarding**: teacher-shared join links (join code + verification code) plus optional API login-by-code; no phone number required
 - **Teacher control plane**: class policies, allowed models, keyword rules, per-student limits
 - **Safety by default**: auth guardrails, lockouts, ban/unban, whitelist/blacklist checks
 - **AI gateway foundation**: chat, image generation, storybook, and video task APIs
@@ -34,11 +34,10 @@ AI4K12 focuses on classroom-first workflows:
 
 ### Student Experience
 
-- Join by class code + verification code
-- Login by class ID + student number + login code
-- Join-link flow with student roster selection
-- Chat with class-allowed models
-- Image, storybook, and video generation tasks
+- Primary UI: open the **teacher-generated login link**, then pick your name from the class roster
+- Backend also supports login by class ID + student number + login code (for integrations/tests)
+- Chat with class-allowed models (demo UI focuses on chat)
+- Image, storybook, and video generation APIs
 
 ### Governance & Safety
 
@@ -68,8 +67,8 @@ Open: `http://localhost:3000`
 
 ### 3) Login (seeded demo account)
 
-- Teacher email: `fendouai@gmail.com`
-- Teacher password: `wo2010WO`
+- Teacher email: `admin@laoshibao.com`
+- Teacher password: `admin@laoshibao.com`
 
 ---
 
@@ -132,6 +131,7 @@ What is already implemented:
 - End-to-end teacher -> class -> student -> AI flow
 - Policy controls and quota enforcement
 - Provider key and model catalog integration points
+- SQLite persistence for system `publicBaseUrl` and provider keys
 - Comprehensive API tests
 
 What is intentionally simplified:

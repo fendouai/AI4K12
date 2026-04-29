@@ -4,19 +4,31 @@ import { z } from "zod";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { authRequired, errorResp, okResp, signToken } from "./auth.js";
-import { config } from "./config.js";
+import { config, resolvePublicBaseUrl } from "./config.js";
 import { classDailyUsage, db, genId, nowIso, randomCode, studentDailyUsage } from "./store.js";
 import { getProviderCatalogKey, listProviderModels, listSystemProviders, upsertProviderKey } from "./providers.js";
+import {
+  initSystemConfigDb,
+  loadPersistedSystemConfig,
+  savePublicBaseUrl,
+  savePublicDomain,
+  savePublicIp,
+  upsertClassPolicyPersistent,
+} from "./system-config-db.js";
 
 const app = express();
 app.use(express.json());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, "..", "web")));
+app.use((req, _res, next) => {
+  req.id = `req_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  next();
+});
 
 function ensureDefaultTeacher() {
-  const email = "fendouai@gmail.com";
-  const password = "wo2010WO";
+  const email = "admin@laoshibao.com";
+  const password = "admin@laoshibao.com";
   const existing = db.teachers.find((t) => t.email === email);
   if (existing) return existing;
   const teacher = {
@@ -36,9 +48,21 @@ function ensureDefaultTeacher() {
 }
 
 ensureDefaultTeacher();
+initSystemConfigDb();
+{
+  const persisted = loadPersistedSystemConfig();
+  db.systemSettings.publicBaseUrl = persisted.publicBaseUrl;
+  db.systemSettings.publicDomain = persisted.publicDomain;
+  db.systemSettings.publicIp = persisted.publicIp;
+  db._persistedClassPolicies = persisted.classPolicies || [];
+  db.systemProviderKeys = {
+    ...db.systemProviderKeys,
+    ...persisted.providerKeys,
+  };
+}
 
 function ensureSchoolSeed() {
-  const teacherEmail = "fendouai@gmail.com";
+  const teacherEmail = "admin@laoshibao.com";
   const teacher = db.teachers.find((t) => t.email === teacherEmail);
   if (!teacher) return;
 
@@ -141,12 +165,13 @@ function ensureSchoolSeed() {
 // Only auto-seed outside of automated test runs.
 if (process.env.NODE_ENV !== "test") {
   ensureSchoolSeed();
+  applyPersistedClassPolicies();
 }
 
 // Dev helper: reseed K12 demo data (clears grades/classes/students for the default teacher).
 app.post("/api/v1/dev/seed-k12", authRequired("teacher"), (req, res) => {
   const teacher = db.teachers.find((t) => t.id === req.auth.sub);
-  if (!teacher || teacher.email !== "fendouai@gmail.com") {
+  if (!teacher || teacher.email !== "admin@laoshibao.com") {
     return res.status(403).json(errorResp("FORBIDDEN", "Only default teacher can seed demo data", req.id));
   }
   db.grades = db.grades.filter((g) => g.teacherId !== teacher.id);
@@ -165,6 +190,51 @@ app.post("/api/v1/dev/seed-k12", authRequired("teacher"), (req, res) => {
 // -----------------------------
 app.get("/api/v1/system/providers", authRequired("teacher"), (req, res) => {
   return res.json(okResp(req.id, { providers: listSystemProviders() }));
+});
+
+app.get("/api/v1/system/settings", authRequired("teacher"), (req, res) => {
+  const settings = db.systemSettings || {};
+  const publicBaseUrl = resolvePublicBaseUrl(settings.publicBaseUrl, settings);
+  return res.json(
+    okResp(req.id, {
+      publicBaseUrl,
+      publicDomain: settings.publicDomain || null,
+      publicIp: settings.publicIp || null,
+    }),
+  );
+});
+
+app.put("/api/v1/system/settings", authRequired("teacher"), (req, res) => {
+  const ipv4Regex = /^(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)$/;
+  const schema = z.object({
+    publicBaseUrl: z.string().url().nullable().optional(),
+    publicDomain: z.string().trim().min(1).nullable().optional(),
+    publicIp: z.string().regex(ipv4Regex, "Invalid IPv4").nullable().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json(errorResp("BAD_REQUEST", "Invalid payload", req.id));
+  db.systemSettings = db.systemSettings || {};
+  if (Object.prototype.hasOwnProperty.call(parsed.data, "publicBaseUrl")) {
+    db.systemSettings.publicBaseUrl = parsed.data.publicBaseUrl || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(parsed.data, "publicDomain")) {
+    db.systemSettings.publicDomain = parsed.data.publicDomain || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(parsed.data, "publicIp")) {
+    db.systemSettings.publicIp = parsed.data.publicIp || null;
+  }
+  savePublicBaseUrl(db.systemSettings.publicBaseUrl);
+  savePublicDomain(db.systemSettings.publicDomain);
+  savePublicIp(db.systemSettings.publicIp);
+  const publicBaseUrl = resolvePublicBaseUrl(db.systemSettings.publicBaseUrl, db.systemSettings);
+  return res.json(
+    okResp(req.id, {
+      updated: true,
+      publicBaseUrl,
+      publicDomain: db.systemSettings.publicDomain || null,
+      publicIp: db.systemSettings.publicIp || null,
+    }),
+  );
 });
 
 app.put("/api/v1/system/providers/:providerKey/keys", authRequired("teacher"), async (req, res) => {
@@ -193,11 +263,6 @@ app.get("/api/v1/system/providers/:providerKey/models", authRequired("teacher"),
   }
 });
 
-app.use((req, _res, next) => {
-  req.id = `req_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-  next();
-});
-
 function minutesLater(mins) {
   return new Date(Date.now() + mins * 60 * 1000).toISOString();
 }
@@ -214,8 +279,27 @@ function classById(classId) {
   return db.classes.find((c) => c.id === classId);
 }
 
+function applyPersistedClassPolicies() {
+  const persisted = Array.isArray(db._persistedClassPolicies) ? db._persistedClassPolicies : [];
+  if (!persisted.length) return;
+  for (const p of persisted) {
+    const teacher = db.teachers.find((t) => t.email === p.teacherEmail);
+    if (!teacher) continue;
+    const cls = db.classes.find((c) => c.teacherId === teacher.id && c.className === p.className);
+    if (!cls) continue;
+    if (p.chatProviderKey) cls.allowedChatProviderKey = p.chatProviderKey;
+    if (Array.isArray(p.chatModels) && p.chatModels.length) cls.allowedChatModels = p.chatModels;
+    if (Array.isArray(p.imageModels)) cls.allowedImageModels = p.imageModels;
+    if (Array.isArray(p.keywordWhitelist)) cls.keywordWhitelist = p.keywordWhitelist;
+    if (Array.isArray(p.keywordBlacklist)) cls.keywordBlacklist = p.keywordBlacklist;
+  }
+}
+
 async function callOpenAICompatibleChat({ baseUrl, apiKey, model, messages }) {
   const normalizedBase = String(baseUrl || "").replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalizedBase)) {
+    throw new Error("PROVIDER_BASE_URL_INVALID");
+  }
   const url = `${normalizedBase}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
@@ -785,6 +869,18 @@ app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
     cls.allowedChatProviderKey = parsed.data.chatProviderKey;
   }
   if (parsed.data.imageModels) cls.allowedImageModels = parsed.data.imageModels;
+  const teacher = teacherFromAuth(req);
+  if (teacher?.email) {
+    upsertClassPolicyPersistent({
+      teacherEmail: teacher.email,
+      className: cls.className,
+      chatProviderKey: cls.allowedChatProviderKey || null,
+      chatModels: cls.allowedChatModels || [],
+      imageModels: cls.allowedImageModels || [],
+      keywordWhitelist: cls.keywordWhitelist || [],
+      keywordBlacklist: cls.keywordBlacklist || [],
+    });
+  }
   return res.json(
     okResp(req.id, {
       classId: cls.id,
@@ -854,6 +950,18 @@ app.put("/api/v1/classes/:classId/policies/keywords", authRequired("teacher"), (
   }
   cls.keywordWhitelist = normalizeKeywords(parsed.data.whitelist);
   cls.keywordBlacklist = normalizeKeywords(parsed.data.blacklist);
+  const teacher = teacherFromAuth(req);
+  if (teacher?.email) {
+    upsertClassPolicyPersistent({
+      teacherEmail: teacher.email,
+      className: cls.className,
+      chatProviderKey: cls.allowedChatProviderKey || null,
+      chatModels: cls.allowedChatModels || [],
+      imageModels: cls.allowedImageModels || [],
+      keywordWhitelist: cls.keywordWhitelist || [],
+      keywordBlacklist: cls.keywordBlacklist || [],
+    });
+  }
   return res.json(
     okResp(req.id, {
       classId: cls.id,

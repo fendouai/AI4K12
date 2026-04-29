@@ -9,6 +9,11 @@ export const db = {
   usageLogs: [],
   safetyEvents: [],
   systemProviderKeys: {}, // { [providerKey]: { apiKey, baseUrl, updatedAt } }
+  systemSettings: {
+    publicBaseUrl: null,
+    publicDomain: null,
+    publicIp: null,
+  },
 };
 
 export function nowIso() {
