@@ -51,6 +51,8 @@ const studentJoinClassInfo = document.getElementById("student-join-class-info");
 const studentJoinSelect = document.getElementById("student-join-select");
 const toastEl = document.getElementById("toast");
 
+const studentChatModelSelect = document.getElementById("student-chat-model-select");
+
 const usageLimitInput = document.getElementById("usage-limit-input");
 const usageStudentFilter = document.getElementById("usage-student-filter");
 const usageRefreshBtn = document.getElementById("usage-refresh-btn");
@@ -324,6 +326,38 @@ async function loadUsageLogs() {
   };
 }
 
+async function loadStudentChatModels() {
+  if (!studentChatModelSelect) return;
+  if (!state.studentToken || !state.classId) return;
+
+  // Ask backend for class-allowed chat models.
+  try {
+    const ret = await api("/api/v1/ai/models?endpoint=chat", "GET", undefined, state.studentToken);
+    const models = ret.data.models || [];
+    studentChatModelSelect.innerHTML = "";
+    if (!models.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "未配置可用模型";
+      studentChatModelSelect.appendChild(opt);
+      return;
+    }
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.displayName || m.id;
+      studentChatModelSelect.appendChild(opt);
+    }
+
+    // Default to primary model.
+    const primary = models.find((m) => m.isPrimary)?.id || models[0]?.id || "";
+    studentChatModelSelect.value = primary;
+  } catch (e) {
+    toast(e?.code ? e.code : "加载模型失败");
+    log(e);
+  }
+}
+
 function showSection(sectionId) {
   [entryGateway, teacherAuth, studentAuth, teacherDashboard, studentWorkspace].forEach((el) => el && el.classList.add("hidden"));
   sectionId.classList.remove("hidden");
@@ -427,13 +461,40 @@ async function refreshSetupAllowedModelsFromPolicy() {
   if (!classId || !state.teacherToken) return;
   const ret = await api(`/api/v1/classes/${classId}/policies/ai-models`, "GET", undefined, state.teacherToken);
   state.setupAllowedChatModels = ret.data.allowedChatModels || [];
+
   const allowed = state.setupAllowedChatModels;
+  const providerKey = ret.data.allowedChatProviderKey || "";
+
   setupCurrentAllowedModelsEl && (setupCurrentAllowedModelsEl.textContent = allowed.length ? `当前：${allowed.join(",")}` : "当前：未配置");
 
-  // Attempt to pre-select the policy model when model options are already loaded.
-  const primary = allowed[0] || "";
-  if (primary && setupChatModelSelect && Array.from(setupChatModelSelect.options).some((o) => o.value === primary)) {
-    setupChatModelSelect.value = primary;
+  // 1) Always ensure the model dropdown has options for currently allowed models.
+  //    This fixes cases where providerKey isn't configured yet but we still want a visible dropdown.
+  if (setupChatModelSelect) {
+    setupChatModelSelect.innerHTML = "";
+    if (allowed.length) {
+      for (const m of allowed) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        setupChatModelSelect.appendChild(opt);
+      }
+      setupChatModelSelect.value = allowed[0];
+    } else {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "未配置可用模型";
+      setupChatModelSelect.appendChild(opt);
+    }
+  }
+
+  // 2) If we have providerKey, try to load the full provider model list
+  //    and keep the current allowed model selected.
+  if (setupModelProviderSelect && providerKey) {
+    setupModelProviderSelect.value = providerKey;
+    await loadSetupChatModels(providerKey).catch((e) => log(e));
+    if (allowed[0] && setupChatModelSelect && Array.from(setupChatModelSelect.options).some((o) => o.value === allowed[0])) {
+      setupChatModelSelect.value = allowed[0];
+    }
   }
 }
 
@@ -501,12 +562,20 @@ setupOpenModelBtn?.addEventListener("click", async () => {
     const classId = setupClassSelect?.value || state.setupClassId;
     if (!classId) return toast("请先选择班级");
     const selectedModel = setupChatModelSelect?.value;
+    const selectedProviderKey = setupModelProviderSelect?.value || undefined;
     if (!selectedModel) return toast("请选择要开放的聊天模型");
+
+    const payload = {
+      chatModels: [selectedModel],
+      imageModels: [],
+    };
+    // Only include providerKey when user actually selected it; otherwise don't overwrite.
+    if (selectedProviderKey) payload.chatProviderKey = selectedProviderKey;
 
     await api(
       `/api/v1/classes/${classId}/policies/ai-models`,
       "PUT",
-      { chatModels: [selectedModel], imageModels: [] },
+      payload,
       state.teacherToken,
     );
     await refreshSetupAllowedModelsFromPolicy();
@@ -897,6 +966,7 @@ document.getElementById("student-login-form").addEventListener("submit", async (
     state.studentToken = ret.data.accessToken;
     state.classId = f.classId.value;
     showSection(studentWorkspace);
+    await loadStudentChatModels().catch((err) => log(err));
     log(ret);
   } catch (err) {
     log(err);
@@ -920,6 +990,7 @@ if (studentJoinLoginForm) {
       state.studentToken = ret.data.accessToken;
       state.classId = ret.data.student.classId;
       showSection(studentWorkspace);
+      await loadStudentChatModels().catch((err) => log(err));
       toast("已登录学生账号");
       history.replaceState({}, document.title, window.location.pathname);
       log(ret);
@@ -934,10 +1005,22 @@ document.getElementById("student-chat-form").addEventListener("submit", async (e
   e.preventDefault();
   const f = e.target;
   try {
-    const ret = await api("/api/v1/ai/chat/completions", "POST", { classId: state.classId, messages: [{ role: "user", content: f.prompt.value }] }, state.studentToken);
-    log(ret);
+    const selectedModel = studentChatModelSelect?.value || undefined;
+    const ret = await api(
+      "/api/v1/ai/chat/completions",
+      "POST",
+      { classId: state.classId, model: selectedModel || undefined, messages: [{ role: "user", content: f.prompt.value }] },
+      state.studentToken,
+    );
+    if (ret?.data?.outputText) {
+      output.textContent = ret.data.outputText;
+      toast("回复已生成");
+    } else {
+      log(ret);
+    }
   } catch (err) {
     log(err);
+    toast(err?.code ? err.code : "发送失败");
   }
 });
 

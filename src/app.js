@@ -214,6 +214,25 @@ function classById(classId) {
   return db.classes.find((c) => c.id === classId);
 }
 
+async function callOpenAICompatibleChat({ baseUrl, apiKey, model, messages }) {
+  const normalizedBase = String(baseUrl || "").replace(/\/+$/, "");
+  const url = `${normalizedBase}/v1/chat/completions`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7 }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.error?.message || json?.message || `UPSTREAM_HTTP_${res.status}`);
+  }
+  const outputText = json?.choices?.[0]?.message?.content || "";
+  return { outputText, raw: json };
+}
+
 function normalizeKeywords(list = []) {
   return [...new Set(list.map((x) => String(x).trim().toLowerCase()).filter(Boolean))];
 }
@@ -737,12 +756,20 @@ app.get("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
   if (!cls || cls.teacherId !== req.auth.sub) {
     return res.status(404).json(errorResp("CLASS_NOT_FOUND", "Class not found", req.id));
   }
-  return res.json(okResp(req.id, { classId: cls.id, allowedChatModels: cls.allowedChatModels || ["deepseek-v3"], allowedImageModels: cls.allowedImageModels || [] }));
+  return res.json(
+    okResp(req.id, {
+      classId: cls.id,
+      allowedChatProviderKey: cls.allowedChatProviderKey || null,
+      allowedChatModels: cls.allowedChatModels || ["deepseek-v3"],
+      allowedImageModels: cls.allowedImageModels || [],
+    }),
+  );
 });
 
 app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), (req, res) => {
   const schema = z.object({
     chatModels: z.array(z.string().min(1)).min(1),
+    chatProviderKey: z.string().min(1).optional(),
     imageModels: z.array(z.string().min(1)).optional(),
   });
   const parsed = schema.safeParse(req.body);
@@ -752,8 +779,20 @@ app.put("/api/v1/classes/:classId/policies/ai-models", authRequired("teacher"), 
     return res.status(404).json(errorResp("CLASS_NOT_FOUND", "Class not found", req.id));
   }
   cls.allowedChatModels = parsed.data.chatModels;
+  // Only update provider key when teacher explicitly sends a non-empty key.
+  // This prevents clearing providerKey accidentally when payload doesn't include it.
+  if (parsed.data.chatProviderKey) {
+    cls.allowedChatProviderKey = parsed.data.chatProviderKey;
+  }
   if (parsed.data.imageModels) cls.allowedImageModels = parsed.data.imageModels;
-  return res.json(okResp(req.id, { classId: cls.id, allowedChatModels: cls.allowedChatModels, allowedImageModels: cls.allowedImageModels || [] }));
+  return res.json(
+    okResp(req.id, {
+      classId: cls.id,
+      allowedChatProviderKey: cls.allowedChatProviderKey || null,
+      allowedChatModels: cls.allowedChatModels,
+      allowedImageModels: cls.allowedImageModels || [],
+    }),
+  );
 });
 
 app.get("/api/v1/classes/:classId/usage", authRequired("teacher"), (req, res) => {
@@ -1135,10 +1174,12 @@ app.get("/api/v1/ai/models", authRequired(), (req, res) => {
   return res.json(okResp(req.id, { endpoint, models }));
 });
 
-app.post("/api/v1/ai/chat/completions", authRequired("student"), (req, res) => {
+app.post("/api/v1/ai/chat/completions", authRequired("student"), async (req, res) => {
   const schema = z.object({
     classId: z.string().uuid(),
     messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string().min(1) })).min(1),
+    // Optional: let student explicitly choose among class-allowed models.
+    model: z.string().min(1).optional(),
     stream: z.boolean().optional(),
   });
   const parsed = schema.safeParse(req.body);
@@ -1159,8 +1200,41 @@ app.post("/api/v1/ai/chat/completions", authRequired("student"), (req, res) => {
     return res.status(429).json(errorResp("QUOTA_EXCEEDED_REQUESTS", "Request quota exceeded", req.id));
   }
   const userPrompt = parsed.data.messages.filter((m) => m.role === "user").at(-1)?.content || "";
-  const selectedModel = cls.allowedChatModels?.[0] || "deepseek-v3";
-  const outputText = `Classroom-safe answer: ${userPrompt.slice(0, 180)}`;
+  const allowedModels = cls.allowedChatModels?.length ? cls.allowedChatModels : ["deepseek-v3"];
+  const requestedModel = parsed.data.model;
+  if (requestedModel && !allowedModels.includes(requestedModel)) {
+    return res.status(403).json(errorResp("MODEL_NOT_ALLOWED", "Requested model is not allowed for this class", req.id, { model: requestedModel }));
+  }
+  const selectedModel = requestedModel || allowedModels[0];
+  let outputText = `Classroom-safe answer: ${userPrompt.slice(0, 180)}`;
+  let upstreamRaw = null;
+  let fallbackUsed = true;
+
+  // Real upstream call: when teacher configured provider key for this class policy.
+  const providerKey = cls.allowedChatProviderKey;
+  if (providerKey && db.systemProviderKeys[providerKey]?.apiKey) {
+    try {
+      const catalog = getProviderCatalogKey(providerKey);
+      if (catalog?.kind === "openai_compatible" || catalog?.kind === "zhipu") {
+        const stored = db.systemProviderKeys[providerKey];
+        const baseUrl =
+          stored.baseUrl ||
+          catalog?.defaults?.baseUrl ||
+          (providerKey === "zai" ? "https://open.bigmodel.cn/api/paas/v4" : undefined);
+        const upstream = await callOpenAICompatibleChat({
+          baseUrl,
+          apiKey: stored.apiKey,
+          model: selectedModel,
+          messages: parsed.data.messages,
+        });
+        outputText = upstream.outputText || outputText;
+        upstreamRaw = upstream.raw;
+        fallbackUsed = false;
+      }
+    } catch (e) {
+      return res.status(502).json(errorResp("UPSTREAM_CHAT_FAILED", String(e?.message || e), req.id, { providerKey, model: selectedModel }));
+    }
+  }
   const promptTokens = Math.max(10, Math.ceil(userPrompt.length / 4));
   const completionTokens = Math.max(20, Math.ceil(outputText.length / 4));
   const sUsage = studentDailyUsage(student.id);
@@ -1174,22 +1248,22 @@ app.post("/api/v1/ai/chat/completions", authRequired("student"), (req, res) => {
     studentId: student.id,
     endpoint: "chat",
     selectedModel,
-    fallbackUsed: false,
+    fallbackUsed,
     promptTokens,
     completionTokens,
     imageCount: 0,
     costCny: Number(((promptTokens + completionTokens) * 0.00001).toFixed(6)),
     statusCode: 200,
     latencyMs: 120,
-    requestPayload: { messages: parsed.data.messages },
-    responsePayload: { outputText },
+    requestPayload: { model: selectedModel, messages: parsed.data.messages },
+    responsePayload: { outputText, upstreamRaw },
     createdAt: nowIso(),
   });
   return res.json(
     okResp(req.id, {
       outputText,
       model: selectedModel,
-      fallbackUsed: false,
+      fallbackUsed,
       usage: { promptTokens, completionTokens },
       safety: { action: "allow", riskScore: 0.01 },
     }),

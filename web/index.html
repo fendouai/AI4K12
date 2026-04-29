@@ -325,6 +325,12 @@
         <div class="grid">
           <form id="student-chat-form">
             <h3>AI 对话</h3>
+            <div class="toolbar">
+              <span class="total-badge">可用模型</span>
+              <select id="student-chat-model-select" style="flex: 1; min-width: 240px;">
+                <option value="">加载中…</option>
+              </select>
+            </div>
             <textarea name="prompt" placeholder="输入你的问题..." required></textarea>
             <button type="submit">发送</button>
           </form>
